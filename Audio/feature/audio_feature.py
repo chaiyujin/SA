@@ -17,7 +17,14 @@ def rms_normalize(input_audio):
                          universal_newlines=True)
     p.communicate()
     if p.returncode == 0:
-        return True, 'normalized-' + os.path.splitext(input_audio)[0] + '.wav'
+        full_prefix = os.path.splitext(input_audio)[0]
+        file_prefix = full_prefix.split('/')
+        path_prefix = '/'.join(file_prefix[0: -1])
+        file_prefix = file_prefix[-1]
+        file_name = 'normalized-' + file_prefix + '.wav'
+        if len(path_prefix) > 0:
+            file_name = path_prefix + '/' + file_name
+        return True, file_name
     else:
         return False, ''
 
