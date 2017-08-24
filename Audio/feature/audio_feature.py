@@ -163,11 +163,9 @@ def lpc_feature(signal, samplerate=16000, winlen=0.025, winstep=0.01,
 
     ret = []
     for i in range(len(frames)):
-        ret.append(
-            lpc_coefficient(frames[i], k, preemphsis)
-        )
+        ret.append(lpc_coefficient(frames[i], k, preemphsis))
 
-    return np.asarray(ret)
+    return ret
 
 
 if __name__ == '__main__':
@@ -184,5 +182,5 @@ if __name__ == '__main__':
         draw_spec(np.flipud(feat.T), 3.5, 37, 0.05)
 
     # sample of lpc feature
-    sample_rate, signal = scipy.io.wavfile.read('ae.wav')
+    sample_rate, signal = scipy.io.wavfile.read('normalized-bbie8s.wav')
     print(lpc_feature(signal, sample_rate, k=4, preemphsis=0.63)[:, 1: 3])

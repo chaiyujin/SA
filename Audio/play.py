@@ -6,7 +6,7 @@ from feature.audio_feature import rms_normalize
 
 chunk = 1024
 
-_, wav_path = rms_normalize('bbie8n.mpg')
+_, wav_path = rms_normalize('bbieza.mpg')
 rate, audio = wav.read(wav_path)
 audio_idx = 0
 audio = audio[16000: 21250]

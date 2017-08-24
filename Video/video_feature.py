@@ -41,14 +41,15 @@ def draw_line(zeros, points, delta=0):
         cv2.line(zeros, points[i], points[j], (150, 150, 150), 1)
 
 
-def draw_mouth_landmarks(W, lm):
-    img = numpy.zeros((W, W, 3))
+def draw_mouth_landmarks(W, lm, color=(0, 255, 0), img=None, delta=(0, 0)):
+    if img is None:
+        img = numpy.zeros((W, W, 3), dtype=numpy.uint8)
     points = []
     for i in range(len(lm)):
-        x = int(lm[i][0] + W / 2)
-        y = int(lm[i][1] + W / 2)
+        x = int(lm[i][0] + W / 2) + delta[0]
+        y = int(lm[i][1] + W / 2) + delta[1]
         points.append((x, y))
-        cv2.circle(img, (x, y), 1, (0, 255, 0), 2)
+        cv2.circle(img, (x, y), 1, color, 2)
     draw_line(img, points, -46)
     return img
 

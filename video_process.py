@@ -2,14 +2,18 @@ from __future__ import division
 import os
 import cv2
 import ffmpy
+import numpy as np
 from scipy.io import wavfile
 from python_speech_features import mfcc
-from Audio.feature.audio_feature import *
-from Video.video_feature import *
+from Audio.feature.audio_feature import lpc_feature, rms_normalize
+from Audio.feature.audio_feature import formant
+from Video.video_feature import init_dde, landmark_feature
+from Video.video_feature import draw_mouth_landmarks
 
 W = 800
 VIDEO_FPS = 25.0
 LOG_LEVEL = 'error'
+
 
 # for generating data
 def remove_files(lists):
@@ -51,25 +55,52 @@ def demux_video(video_path, clear_old=False):
     return {'video_path': v_path, 'audio_path': w_path}
 
 
-def pre_process_video(video_path):
+def pre_process_video(video_path, audio_feature='mfcc',
+                      winlen=0.025, winstep=0.01, **kwarg):
     # upsampling video feature
     init_dde()
     video_path = os.path.abspath(video_path)
     video_path = video_path.replace('\\', '/')
     path = demux_video(video_path)
 
+    upsampling_rate = 1 / (VIDEO_FPS * winstep)
+    if upsampling_rate - int(upsampling_rate) != 0:
+        raise ValueError('Upsampling rate is not integer.')
+    upsampling_rate = int(upsampling_rate)
+    print('Fetching video feature...')
     low_rate_lm = landmark_feature(path['video_path'], only_mouth=True)
     lm_feature = []
     for i in range(len(low_rate_lm) - 1):
         left = low_rate_lm[i]
         delta = low_rate_lm[i + 1] - left
-        for k in range(4):
-            lm_feature.append(left + delta * k / 4)
+        for k in range(upsampling_rate):
+            lm_feature.append(left + delta * k / upsampling_rate)
     lm_feature.append(low_rate_lm[-1])  # the last one
 
     # audio feature
+    print('Fetching audio feature...')
+    print(path['audio_path'])
     rate, audio = wavfile.read(path['audio_path'])
-    mfcc_feature = mfcc(audio, rate, nfft=1024)
+    if audio_feature == 'mfcc':
+        nfft = 512
+        while winlen * rate > nfft:
+            nfft = nfft << 1
+        a_feature = mfcc(audio, rate, winlen=winlen,
+                         winstep=winstep, nfft=nfft)
+    elif audio_feature == 'lpc' or audio_feature == 'formant':
+        # get k and pre_e from the kwarg
+        k = kwarg['k'] if 'k' in kwarg else 4
+        preemphsis = kwarg['pre_e'] if 'pre_e' in kwarg else None
+        # calc lpc
+        a_feature = lpc_feature(audio, rate,
+                                winlen=winlen, winstep=winstep,
+                                k=k, preemphsis=preemphsis)
+        # extra step for formant
+        if audio_feature == 'formant':
+            for i in range(len(a_feature)):
+                a_feature[i] = formant(a_feature[i], rate)
+    else:
+        raise NotImplementedError('No such audio feature!')
 
     # read align
     path_split = video_path.split('/')
@@ -91,9 +122,11 @@ def pre_process_video(video_path):
 
     return {
         'video_feature': lm_feature,
-        'audio_feature': mfcc_feature,
-        'alignment': align
+        'audio_feature': a_feature,
+        'alignment': align,
+        'path': path
     }
+
 
 # for sampling result
 
@@ -142,8 +175,9 @@ def sample_video(data, media_path):
         )
         os.remove(m_path_true + '.avi')
 
+
 if __name__ == '__main__':
     from utils.dir import find_files
     lists = find_files('Video', 'mpg')
     for file_path in lists:
-        print(pre_process_video(file_path)['alignment'])
+        print(pre_process_video(file_path, 'lpc')['audio_feature'][0])
