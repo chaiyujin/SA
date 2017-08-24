@@ -1,2 +1,5 @@
 *.mpg
 *.wav
+*
+*.DS_Store
+bbieza.lm
