@@ -5,9 +5,10 @@ import dde
 import numpy
 import fbxanime
 
-DDE_PATH = 'C:/Users/yushroom/Anaconda2/envs/tensorflow/Lib/site-packages/v3.bin'
-FBX_PATH = 'C:/Users/yushroom/Anaconda2/envs/tensorflow/Lib/site-packages/fbx_anime.fbx'
+DDE_PATH = 'C:/Users/yushroom/AppData/Local/conda/conda/envs/tensorflow/Lib/site-packages/v3.bin'
+FBX_PATH = 'C:/Users/yushroom/AppData/Local/conda/conda/envs/tensorflow/Lib/site-packages/fbx_anime.fbx'
 
+g_dde_inited = False
 
 def init_dde_fbx(
         dde_path=DDE_PATH,
@@ -21,8 +22,11 @@ def init_dde_fbx(
 
 
 def init_dde(dde_path=DDE_PATH):
-    dde.init(dde_path)
-    dde.set_n_copies(120)
+    global g_dde_inited
+    if not g_dde_inited:
+        dde.init(dde_path)
+        dde.set_n_copies(120)
+        g_dde_inited = True
 
 
 def draw_line(zeros, points, delta=0):
@@ -154,6 +158,9 @@ def landmark_feature(video_path, only_mouth=False, force_clean=False, try_limit=
     if need_scan:
         print('Scaning media', video_path)
         anime_data = scan_media(video_path, try_limit, repeat, show)
+        if anime_data is None:
+            os.remove(video_path)
+            return None
         with open(lm_path, 'w') as file:
             for data in anime_data:
                 for d in data:
@@ -178,16 +185,35 @@ def landmark_feature(video_path, only_mouth=False, force_clean=False, try_limit=
     return anime_data
 
 
-
-
 if __name__ == '__main__':
+    # find files
+    def find_files(path, target_ext):
+        if target_ext[0] != '.':
+            target_ext = '.' + target_ext
+        result_list = []
+        for parent, dirs, files in os.walk(path):
+            for file in files:
+                name, ext = os.path.splitext(os.path.join(parent, file))
+                if ext == target_ext:
+                    result_list.append(name + ext)
+        return result_list
+
     init_dde()
-    # if len(sys.argv) == 1:
-    #     scan_media('bbieza.mpg', show=True)
-    # else:
-    #     scan_media(sys.argv[1], show=True)
-    anime = landmark_feature('bbieza.mpg', only_mouth=True)
-    for data in anime:
-        img = draw_mouth_landmarks(800, data)
-        cv2.imshow('frame', img)
-        cv2.waitKey(30)
+    lists = find_files('GRID', 'mpg')
+    length = len(lists)
+    for i, video_file in enumerate(lists):
+        print('[' + str(i) + '/' + str(length) + ']')
+        landmark_feature(video_file)
+
+
+# if __name__ == '__main__':
+#     init_dde()
+#     # if len(sys.argv) == 1:
+#     #     scan_media('bbieza.mpg', show=True)
+#     # else:
+#     #     scan_media(sys.argv[1], show=True)
+#     anime = landmark_feature('bbieza.mpg', only_mouth=True)
+#     for data in anime:
+#         img = draw_mouth_landmarks(800, data)
+#         cv2.imshow('frame', img)
+#         cv2.waitKey(30)

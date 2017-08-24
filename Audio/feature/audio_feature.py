@@ -12,6 +12,7 @@ from python_speech_features import fbank, delta, lifter
 
 
 def rms_normalize(input_audio):
+    input_audio = input_audio.replace('\\', '/')
     cmd = ['ffmpeg-normalize', '-v', '-f', '-e', '-ar 25000 -ac 1', input_audio]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          universal_newlines=True)
