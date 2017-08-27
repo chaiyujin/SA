@@ -7,15 +7,18 @@ from model.nv_net import Net, Trainer
 from Video.video_feature import draw_mouth_landmarks
 
 
-bs = 8
+video_path = 'F:/dataset/GRID/video/s1/video/mpg_6000'
+
+bs = 16
 # process data
-collector = ForNvidia('Video/mpg', 'test')
+collector = ForNvidia(video_path, 'test.pkl')
 all_data, data_size = collector.collect()
 collector.pca_video_feature()
 print(collector.pca.components_.shape)
 print(all_data['input'][0].shape)
 print(all_data['output'][0].shape)
 data_set = DataSet(all_data, data_size, bs)
+print(data_set.random_batch())
 
 # input tensor
 x = tf.placeholder(tf.float32, [bs, 64, 32, 1])
@@ -27,7 +30,7 @@ trainer = Trainer(net, data_set)
 
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
-    trainer.train(sess, 10000)
+    trainer.train(sess, 1000)
 
     for i in range(int(data_size / bs)):
         res = trainer.predict(

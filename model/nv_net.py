@@ -247,7 +247,7 @@ class Net():
         self.optimizer = tf.train.AdamOptimizer(1e-4).minimize(
             self.loss, var_list=self.var_list
         )
-        self.pca_optimizer = tf.train.AdamOptimizer(1e-8).minimize(
+        self.pca_optimizer = tf.train.AdamOptimizer(1e-4).minimize(
             self.loss, var_list=self.pca_coeff
         )
         # gradient for e
@@ -300,7 +300,7 @@ class Trainer():
             # self.data_set_.adjust_e_vector(new_e, indexes)
             # net optimizer
             sess.run(
-                [self.net_.optimizer],  #, self.net_.pca_optimizer],
+                [self.net_.optimizer, self.net_.pca_optimizer],
                 feed_dict=feed_dict
             )    
             # 3. update the loss regularizer

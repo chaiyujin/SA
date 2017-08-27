@@ -32,7 +32,7 @@ class DataSet():
 
 
 if __name__ == '__main__':
-    data_set = DataSet(np.random.rand(1000, 5), 16)
+    data_set = DataSet(np.random.rand(1000, 5), 1000, 1)
     _, indexes = data_set.random_batch()
     length = int(len(indexes) / 2)
     print(indexes[:length])

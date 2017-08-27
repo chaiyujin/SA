@@ -1,4 +1,6 @@
+import os
 import cv2
+import pickle
 import numpy as np
 from sklearn.decomposition import PCA
 from utils.dir import find_files
@@ -12,7 +14,7 @@ class ForNvidia():
     def __init__(self, input_dir, output_dir,
                  video_ext='mpg', audio_wlen=0.016,
                  audio_wstep=0.008, audio_n_frame=64,
-                 lpc_k=16, lpc_pre_e=None, feature_gap=5):
+                 lpc_k=16, lpc_pre_e=None, feature_gap=2):
         self._input_dir = input_dir
         self._output_dir = output_dir
         self._ext = video_ext
@@ -25,6 +27,11 @@ class ForNvidia():
         self.pca = None
 
     def collect(self, loc=0.0, scale=0.01, E=24, keep_even=True, wait_key=-1):
+        if os.path.exists(self._output_dir):
+            with open(self._output_dir, 'rb') as file:
+                res = pickle.load(file)
+                self._all_video_feature = res[2]
+                return res[0], res[1]
         print('Collecting data from:', self._input_dir)
         self.data_map = {
             'input': [],
@@ -82,6 +89,15 @@ class ForNvidia():
         for k in self.data_map:
             self.data_map[k] = np.asarray(self.data_map[k])
 
+        with open(self._output_dir, 'wb') as f:
+            pickle.dump(
+                (
+                    self.data_map,
+                    len(self.data_map['input']),
+                    self._all_video_feature
+                ),
+                f
+            )
         return self.data_map, len(self.data_map['input'])
 
     def pca_video_feature(self):
