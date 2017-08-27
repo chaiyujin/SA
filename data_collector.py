@@ -12,7 +12,7 @@ class ForNvidia():
     def __init__(self, input_dir, output_dir,
                  video_ext='mpg', audio_wlen=0.016,
                  audio_wstep=0.008, audio_n_frame=64,
-                 lpc_k=16, lpc_pre_e=None, feature_gap=2):
+                 lpc_k=16, lpc_pre_e=None, feature_gap=5):
         self._input_dir = input_dir
         self._output_dir = output_dir
         self._ext = video_ext
@@ -24,9 +24,14 @@ class ForNvidia():
         self._feature_gap = feature_gap
         self.pca = None
 
-    def collect(self, wait_key=-1):
+    def collect(self, loc=0.0, scale=0.01, E=24, keep_even=True, wait_key=-1):
         print('Collecting data from:', self._input_dir)
-        self.data = []
+        self.data_map = {
+            'input': [],
+            'output': [],
+            'e_vector': [],
+            'path': []
+        }
         self._all_video_feature = []
         lists = find_files(self._input_dir, self._ext)
         for count, path in enumerate(lists):
@@ -37,6 +42,9 @@ class ForNvidia():
             # 520ms => 64 * 8ms
             data = []
             length = len(result['audio_feature']) - self._aframe
+            if keep_even:
+                if int(length / self._feature_gap) & 1 == 0:
+                    length -= self._feature_gap
             for i in range(0, length, self._feature_gap):
                 l = i
                 r = l + self._aframe
@@ -50,21 +58,31 @@ class ForNvidia():
                 # move to center
                 mid -= mid.mean()
                 # save in the all video feature
-                self._all_video_feature.extend(mid)
+                self._all_video_feature.append(mid.flatten())
                 # save in the data
                 data.append({
-                    'video': mid,
-                    'audio': np.asarray(result['audio_feature'])[l: r, 1:]
+                    'video': np.asarray(mid, np.float32),
+                    'audio': np.asarray(
+                        result['audio_feature'], np.float32)[l: r, 1:]
                 })
                 # show the mouth
                 if wait_key >= 0:
                     img = draw_mouth_landmarks(800, mid)
                     cv2.imshow('mouth', img)
                     cv2.waitKey(wait_key)
-            self.data.append({
-                'data': data,
-                'path': result['path']
-            })
+            print('->Get', len(data))
+            e_vector = np.random.normal(loc=loc, scale=scale, size=(E))
+            for i in range(len(data)):
+                self.data_map['input'].append(
+                    np.expand_dims(data[i]['audio'], -1))
+                self.data_map['output'].append(data[i]['video'].flatten())
+                self.data_map['e_vector'].append(e_vector)
+                self.data_map['path'].append(result['path'])
+
+        for k in self.data_map:
+            self.data_map[k] = np.asarray(self.data_map[k])
+
+        return self.data_map, len(self.data_map['input'])
 
     def pca_video_feature(self):
         self.pca = PCA(n_components=0.97, svd_solver='full')
@@ -75,12 +93,13 @@ if __name__ == '__main__':
     collector = ForNvidia('Video/mpg', 'test')
     collector.collect(wait_key=-1)
     collector.pca_video_feature()
-    for data in collector.data:
-        for d in data['data']:
-            lm = d['video']
-            img = draw_mouth_landmarks(800, lm)
-            x = collector.pca.transform(lm)
-            lm = collector.pca.inverse_transform(x)
-            img = draw_mouth_landmarks(800, lm, (0, 0, 255), img, (0, 100))
-            cv2.imshow('mouth', img)
-            cv2.waitKey(1)
+    # for data in collector.data_maps:
+    #     for d in data['data']:
+    #         lm = d['video']
+    #         img = draw_mouth_landmarks(800, lm)
+    #         x = collector.pca.transform(lm)
+    #         lm = collector.pca.inverse_transform(x)
+    #         img = draw_mouth_landmarks(800, lm, (0, 0, 255), img, (0, 100))
+    #         cv2.imshow('mouth', img)
+    #         cv2.waitKey(1)
+    print(collector.data_list.shape)

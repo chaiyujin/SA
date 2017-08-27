@@ -121,8 +121,8 @@ def pre_process_video(video_path, audio_feature='mfcc',
             })
 
     return {
-        'video_feature': lm_feature,
-        'audio_feature': a_feature,
+        'video_feature': np.asarray(lm_feature, np.float32),
+        'audio_feature': np.asarray(a_feature, np.float32),
         'alignment': align,
         'path': path
     }
@@ -176,8 +176,41 @@ def sample_video(data, media_path):
         os.remove(m_path_true + '.avi')
 
 
+# the processed video must have even number of frames (paired for training)
+# def generate_data(dir_path, E=24, loc=0.0, scale=0.01,
+#                   audio_feature='lpc', winlen=0.016,
+#                   winstep=0.008, **kwarg):
+#     from utils.dir import find_files
+#     lists = find_files(dir_path, 'mpg')
+#     if 'k' in kwarg:
+#         kwarg['k'] = int(kwarg['k'] / 2)
+#     all_data = []
+#     for file_path in lists:
+#         data = pre_process_video(
+#             file_path, audio_feature,
+#             winlen, winstep, **kwarg
+#         )
+#         length = len(data['video_feature'])
+#         if len(data['audio_feature']) < length:
+#             length = len(data['audio_feature'])
+#         length -= 10
+#         if length & 1 > 0:
+#             length -= 1
+#         # random e vector
+#         e_vector = np.random.normal(loc=loc, scale=scale, size=(E))
+#         for i in range(length):
+#             all_data.append({
+#                 'input': data['audio_feature'][i],
+#                 'output': data['video_feature'][i].flatten(),
+#                 'e_vector': np.asarray(e_vector, np.float32)
+#             })
+#     return np.asarray(all_data)
+
+
 if __name__ == '__main__':
-    from utils.dir import find_files
-    lists = find_files('Video', 'mpg')
-    for file_path in lists:
-        print(pre_process_video(file_path, 'lpc')['audio_feature'][0])
+    # from utils.dir import find_files
+    # lists = find_files('Video', 'mpg')
+    # for file_path in lists:
+    #     print(pre_process_video(file_path, 'lpc')['audio_feature'][0])
+    # print(generate_data('Video', k=32, pre_e=0.63)[-1]['e_vector'].shape)
+    pass
