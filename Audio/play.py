@@ -7,9 +7,10 @@ from feature.audio_feature import rms_normalize
 chunk = 1024
 
 _, wav_path = rms_normalize('bbieza.mpg')
-rate, audio = wav.read(wav_path)
+rate, audio = wav.read('test.wav')
+print(rate)
 audio_idx = 0
-audio = audio[16000: 21250]
+# audio = audio[16000: 21250]
 
 def block_play():
     p = pyaudio.PyAudio()

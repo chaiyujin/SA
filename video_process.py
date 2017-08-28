@@ -108,17 +108,18 @@ def pre_process_video(video_path, audio_feature='mfcc',
     align_path = '/'.join(path_split[: -3]) + '/align/' + prefix + '.align'
 
     align = []
-    with open(align_path) as file:
-        for the_line in file:
-            line = the_line.split(' ')
-            start = int(line[0])
-            end = int(line[1])
-            word = line[2].strip()
-            align.append({
-                'start': start,
-                'end': end,
-                'word': word
-            })
+    if os.path.exists(align_path):
+        with open(align_path) as file:
+            for the_line in file:
+                line = the_line.split(' ')
+                start = int(line[0])
+                end = int(line[1])
+                word = line[2].strip()
+                align.append({
+                    'start': start,
+                    'end': end,
+                    'word': word
+                })
 
     return {
         'video_feature': np.asarray(lm_feature, np.float32),

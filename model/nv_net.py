@@ -1,5 +1,6 @@
 from __future__ import absolute_import
 
+import cv2
 import sys
 import numpy as np
 import tensorflow as tf
@@ -20,16 +21,28 @@ def print_shape(tensor, output_name=None):
     print(output_name, shape)
 
 
+def lrelu(x, leak=0.2, name="lrelu"):
+    with tf.variable_scope(name):
+        f1 = 0.5 * (1 + leak)
+        f2 = 0.5 * (1 - leak)
+        return f1 * x + f2 * abs(x)
+
+
 def audio_abstraction_net(input):
     scope = sys._getframe().f_code.co_name
     with tf.variable_scope(scope):
         # input: 64 x 32 x 1
         layers_config = [
-            {'num_outputs': 72, 'kernel_size': (1, 3), 'stride': (1, 2)},
-            {'num_outputs': 108, 'kernel_size': (1, 3), 'stride': (1, 2)},
-            {'num_outputs': 162, 'kernel_size': (1, 3), 'stride': (1, 2)},
-            {'num_outputs': 243, 'kernel_size': (1, 3), 'stride': (1, 2)},
-            {'num_outputs': 256, 'kernel_size': (1, 2), 'stride': (1, 2)}
+            {'num_outputs': 72, 'kernel_size': (1, 3),
+             'stride': (1, 2), 'activation_fn': lrelu},
+            {'num_outputs': 108, 'kernel_size': (1, 3),
+             'stride': (1, 2), 'activation_fn': lrelu},
+            {'num_outputs': 162, 'kernel_size': (1, 3),
+             'stride': (1, 2), 'activation_fn': lrelu},
+            {'num_outputs': 243, 'kernel_size': (1, 3),
+             'stride': (1, 2), 'activation_fn': lrelu},
+            {'num_outputs': 256, 'kernel_size': (1, 2),
+             'stride': (1, 2), 'activation_fn': lrelu}
         ]
 
         print(scope + ' {')
@@ -65,11 +78,16 @@ def articulation_net(audio_feature, e_vector):
     with tf.variable_scope(scope):
         # input: 32 x 1 x (256 + E)
         layers_config = [
-            {'num_outputs': 256, 'kernel_size': (3, 1), 'stride': (2, 1)},
-            {'num_outputs': 256, 'kernel_size': (3, 1), 'stride': (2, 1)},
-            {'num_outputs': 256, 'kernel_size': (3, 1), 'stride': (2, 1)},
-            {'num_outputs': 256, 'kernel_size': (3, 1), 'stride': (2, 1)},
-            {'num_outputs': 256, 'kernel_size': (4, 1), 'stride': (4, 1)}
+            {'num_outputs': 256, 'kernel_size': (3, 1),
+             'stride': (2, 1), 'activation_fn': lrelu},
+            {'num_outputs': 256, 'kernel_size': (3, 1),
+             'stride': (2, 1), 'activation_fn': lrelu},
+            {'num_outputs': 256, 'kernel_size': (3, 1),
+             'stride': (2, 1), 'activation_fn': lrelu},
+            {'num_outputs': 256, 'kernel_size': (3, 1),
+             'stride': (2, 1), 'activation_fn': lrelu},
+            {'num_outputs': 256, 'kernel_size': (4, 1),
+             'stride': (4, 1), 'activation_fn': lrelu}
         ]
 
         print(scope + ' {')
@@ -94,7 +112,7 @@ def articulation_net(audio_feature, e_vector):
     return layer[-1], var_list
 
 
-def output_net(anime_feature, init_pca_vectors):
+def output_net(anime_feature, init_pca, init_mean):
     print('output_net {')
     old_shape = get_shape(anime_feature)
     new_shape = [old_shape[0], old_shape[-1]]
@@ -107,19 +125,21 @@ def output_net(anime_feature, init_pca_vectors):
     with tf.variable_scope('anime_dense'):
         layer_config = {
             'inputs': anime_feature,
-            'num_outputs': len(init_pca_vectors),
-            'activation_fn': None
+            'num_outputs': len(init_pca),
+            'activation_fn': lrelu
         }
         pca_coeff = tflayers.fully_connected(**layer_config)
         print_shape(pca_coeff, '\tlayer0 output')
     # init the network with pca vectors
     with tf.variable_scope('pca_dense'):
-        init = tf.constant_initializer(value=init_pca_vectors)
+        init_w = tf.constant_initializer(value=init_pca)
+        init_b = tf.constant_initializer(value=init_mean)
         layer_config = {
             'inputs': pca_coeff,
-            'num_outputs': init_pca_vectors.shape[1],
+            'num_outputs': init_pca.shape[1],
             'activation_fn': None,
-            'weights_initializer': init
+            'weights_initializer': init_w,
+            'biases_initializer': init_b
         }
         landmarks = tflayers.fully_connected(**layer_config)
         print_shape(landmarks, '\tfinal output')
@@ -133,7 +153,7 @@ def output_net(anime_feature, init_pca_vectors):
         tf.GraphKeys.TRAINABLE_VARIABLES,
         scope='pca_dense'
     )
-    return landmarks, var_list0, var_list1
+    return pca_coeff, landmarks, var_list0, var_list1
 
 
 def loss_function(pred, true, e_vector):
@@ -188,7 +208,8 @@ def regularize_loss(loss_list, reg_list):
         tf.reduce_mean(loss_list[2]),
         reg_list[2].scale
     )
-    return tf.add(tf.add(Lp, Lm), Lr)
+    return tf.add(Lp, Lm)
+    # return tf.add(tf.add(Lp, Lm), Lr)
 
 
 class LossRegularizer():
@@ -207,6 +228,7 @@ class LossRegularizer():
             (1 - self.decay_) * (loss ** 2).mean()
         self.beta_t_ *= self.decay_
         v_hat = self.v_ / (1 - self.beta_t_)
+        print('update', 1 / (np.sqrt(v_hat) + 1e-8))
         # update feed_dict
         self.feed_dict = {
             self.scale: np.asarray(
@@ -217,11 +239,11 @@ class LossRegularizer():
 
 
 class Net():
-    def __init__(self, input, output, e_vector, init_pca_vectors):
+    def __init__(self, input, output, e_vector, init_pca, init_mean):
         audio_feature, var_list0 = audio_abstraction_net(input)
         anime_feature, var_list1 = articulation_net(audio_feature, e_vector)
-        landmarks_pred, var_list2, var_list3 =\
-            output_net(anime_feature, init_pca_vectors)
+        pca_coeff, landmarks_pred, var_list2, var_list3 =\
+            output_net(anime_feature, init_pca, init_mean)
         var_list0.extend(var_list1)
         var_list0.extend(var_list2)
         # input, output, e_vector
@@ -229,30 +251,32 @@ class Net():
         self.output = output
         self.e_vector = e_vector
         self.pred = landmarks_pred
+        self.pca = pca_coeff
         # all var and pca coefficient
         self.var_list = var_list0
-        self.pca_coeff = var_list3
+        self.pca_var = var_list3
         self.loss_fn_list = loss_function(landmarks_pred, output, e_vector)
         # regularized loss
         self.loss_regular_ = []
         for i, loss_fn in enumerate(self.loss_fn_list):
             self.loss_regular_.append(LossRegularizer())
         self.loss = regularize_loss(self.loss_fn_list, self.loss_regular_)
-
-        self.loss = tf.losses.absolute_difference(
-            labels=self.output,
-            predictions=self.pred
-        )
+        # self.loss = tf.losses.mean_pairwise_squared_error(
+        #     labels=self.output,
+        #     predictions=self.pred
+        # )
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(1e-4).minimize(
             self.loss, var_list=self.var_list
         )
-        self.pca_optimizer = tf.train.AdamOptimizer(1e-4).minimize(
-            self.loss, var_list=self.pca_coeff
+        self.pca_optimizer = tf.train.AdamOptimizer(1e-12).minimize(
+            self.loss, var_list=self.pca_var
         )
         # gradient for e
-        self.grad_E = tf.gradients(self.loss, [e_vector])[0]
-        self.E_optimizer = Adam(1e-8)
+        # self.grad_E = tf.gradients(self.loss, [e_vector])[0]
+        # self.E_optimizer = Adam(1e-8)
+
+        self.saver = tf.train.Saver()
 
     def feed_dict(self, batch):
         feed = {
@@ -272,24 +296,24 @@ class Net():
             reg.update(loss)
 
 
-class Trainer():
+class Handler():
     def __init__(self, net, data_set):
         self.data_set_ = data_set
         self.net_ = net
 
-    def train(self, sess, n_epoches):
+    def train(self, sess, n_epoches, draw_mouth_landmarks):
         for epoch in range(n_epoches):
-            batch, indexes = self.data_set_.random_batch()
+            batch, indexes = self.data_set_.next_batch()
             # 1. calc loss function
             feed_dict = self.net_.feed_dict(batch)
             to_run = []
             for i in range(len(self.net_.loss_fn_list)):
                 to_run.append(self.net_.loss_fn_list[i])
             to_run.extend([
-                self.net_.grad_E,
+                # self.net_.grad_E,
                 self.net_.loss
             ])
-            to_run = [self.net_.loss]
+            # to_run = [self.net_.pca, self.net_.loss]
             result = sess.run(to_run, feed_dict=feed_dict)
             # 2. optimize e vector
             # grad_E = result[-2]
@@ -300,7 +324,7 @@ class Trainer():
             # self.data_set_.adjust_e_vector(new_e, indexes)
             # net optimizer
             sess.run(
-                [self.net_.optimizer, self.net_.pca_optimizer],
+                [self.net_.optimizer],  #, self.net_.pca_optimizer],
                 feed_dict=feed_dict
             )    
             # 3. update the loss regularizer
@@ -308,8 +332,22 @@ class Trainer():
                 result[:len(self.net_.loss_fn_list)]
             )
             # 4. print the loss
-            epoch_loss = result[-1]
-            print('[' + str(epoch) + '/' + str(n_epoches) + ']', epoch_loss)
+            print('[' + str(epoch) + '/' + str(n_epoches) + ']',
+                  '%.4f' % result[0].mean(), '%.4f' % result[1].mean())
+            if epoch % 100 == 0:
+                self.net_.saver.save(sess, 'save/my-model.pkl')
+                res = self.predict(sess, batch['input'], batch['e_vector'])
+                bs = self.data_set_.bs_
+                for j in range(bs):
+                    pred = res[j]
+                    true = batch['output'][j]
+                    pred = np.reshape(pred, (18, 2))
+                    true = np.reshape(true, (18, 2))
+
+                    img = draw_mouth_landmarks(800, pred)
+                    img = draw_mouth_landmarks(800, true, (0, 0, 255), img, (0, 100))
+                    cv2.imshow('frame', img)
+                    cv2.waitKey(40)
 
     def predict(self, sess, input, e_vector):
         to_run = [self.net_.pred]
@@ -319,6 +357,9 @@ class Trainer():
         }
 
         return sess.run(to_run, feed_dict=feed_dict)[0]
+
+    def restore(self, sess, path='save/my-model.pkl'):
+        self.net_.saver.restore(sess, path)
 
 
 if __name__ == '__main__':

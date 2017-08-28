@@ -8,6 +8,29 @@ class DataSet():
         self.size_ = data_size
         self.bs_ = batch_size
         self.hs_ = int(batch_size / 2)
+        # for next batch()
+        self.loop_i_ = 0
+
+    def next_batch(self):
+        indexes = [int(d % int((self.size_ - 1) / 2)) for d in range(
+            self.loop_i_ * self.hs_,
+            (self.loop_i_ + 1) * self.hs_
+        )]
+        right = []
+        for i in range(len(indexes)):
+            indexes[i] *= 2
+            right.append(indexes[i] + 1)
+        right = np.asarray(right, dtype=np.int)
+        # print(indexes)
+        # print(right)
+        indexes = np.concatenate((indexes, right), axis=0)
+        res = {}
+        for k in self.data_:
+            res[k] = self.data_[k][indexes]
+        self.loop_i_ += 1
+        if self.loop_i_ * self.hs_ > (self.size_ - 1) / 2:
+            self.loop_i_ = 0
+        return res, indexes
 
     def random_batch(self):
         indexes = np.random.randint(
@@ -22,7 +45,7 @@ class DataSet():
         res = {}
         for k in self.data_:
             res[k] = self.data_[k][indexes]
-        
+
         return res, indexes
 
     def adjust_e_vector(self, new_e, indexes):

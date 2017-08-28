@@ -1,5 +1,6 @@
 import os
 import math
+import ffmpy
 import subprocess
 import numpy as np
 import scipy.io.wavfile
@@ -13,7 +14,8 @@ from python_speech_features import fbank, delta, lifter
 
 def rms_normalize(input_audio):
     input_audio = input_audio.replace('\\', '/')
-    cmd = ['ffmpeg-normalize', '-v', '-f', '-e', '-ar 25000 -ac 1', input_audio]
+    cmd = ['ffmpeg-normalize', '-v', '-f', '-e', '-ar 25000 -ac 1',
+           input_audio]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          universal_newlines=True)
     p.communicate()
@@ -25,6 +27,11 @@ def rms_normalize(input_audio):
         file_name = 'normalized-' + file_prefix + '.wav'
         if len(path_prefix) > 0:
             file_name = path_prefix + '/' + file_name
+        if not os.path.exists(file_name):
+            ffmpy.FFmpeg(
+                inputs={input_audio: None},
+                outputs={file_name: '-f wav -vn -ac 1 -ar 25000 -y -loglevel error'}
+            ).run()
         return True, file_name
     else:
         return False, ''
@@ -170,7 +177,7 @@ def lpc_feature(signal, samplerate=16000, winlen=0.025, winstep=0.01,
 
 if __name__ == '__main__':
     # sample of mfcc
-    successful, norm_file = rms_normalize('test.wav')
+    successful, norm_file = rms_normalize('pwwq9s.mpg')
     print(successful, norm_file)
     if successful:
         sample_rate, signal = scipy.io.wavfile.read(norm_file)

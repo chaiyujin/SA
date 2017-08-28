@@ -11,12 +11,11 @@ from Video.video_feature import draw_mouth_landmarks
 
 
 class ForNvidia():
-    def __init__(self, input_dir, output_dir,
+    def __init__(self, input_dir,
                  video_ext='mpg', audio_wlen=0.016,
                  audio_wstep=0.008, audio_n_frame=64,
                  lpc_k=16, lpc_pre_e=None, feature_gap=2):
         self._input_dir = input_dir
-        self._output_dir = output_dir
         self._ext = video_ext
         self._k = lpc_k
         self._pre_e = lpc_pre_e
@@ -26,10 +25,13 @@ class ForNvidia():
         self._feature_gap = feature_gap
         self.pca = None
 
-    def collect(self, loc=0.0, scale=0.01, E=24, keep_even=True, wait_key=-1):
-        if os.path.exists(self._output_dir):
-            with open(self._output_dir, 'rb') as file:
+    def collect(self, loc=0.0, scale=0.01, E=24,
+                keep_even=True, wait_key=-1,
+                cache_path=None, force_replace=False):
+        if (not force_replace) and cache_path and os.path.exists(cache_path):
+            with open(cache_path, 'rb') as file:
                 res = pickle.load(file)
+                self.data_map = res[0]
                 self._all_video_feature = res[2]
                 return res[0], res[1]
         print('Collecting data from:', self._input_dir)
@@ -89,15 +91,16 @@ class ForNvidia():
         for k in self.data_map:
             self.data_map[k] = np.asarray(self.data_map[k])
 
-        with open(self._output_dir, 'wb') as f:
-            pickle.dump(
-                (
-                    self.data_map,
-                    len(self.data_map['input']),
-                    self._all_video_feature
-                ),
-                f
-            )
+        if cache_path:
+            with open(cache_path, 'wb') as f:
+                pickle.dump(
+                    (
+                        self.data_map,
+                        len(self.data_map['input']),
+                        self._all_video_feature
+                    ),
+                    f
+                )
         return self.data_map, len(self.data_map['input'])
 
     def pca_video_feature(self):
@@ -106,16 +109,48 @@ class ForNvidia():
 
 
 if __name__ == '__main__':
-    collector = ForNvidia('Video/mpg', 'test')
-    collector.collect(wait_key=-1)
+    import tensorflow as tf
+    import tensorflow.contrib.layers as tflayers
+
+    def pca_net(pca_coeff, init_pca, init_mean):
+        with tf.variable_scope('pca_dense'):
+            init_w = tf.constant_initializer(value=init_pca)
+            init_b = tf.constant_initializer(value=init_mean)
+            layer_config = {
+                'inputs': pca_coeff,
+                'num_outputs': init_pca.shape[1],
+                'activation_fn': None,
+                'weights_initializer': init_w,
+                'biases_initializer': init_b
+            }
+            landmarks = tflayers.fully_connected(**layer_config)
+            # print_shape(landmarks, '\tfinal output')
+        return landmarks
+
+    pca_coeff = tf.placeholder(tf.float32, (1, 3))
+
+    collector = ForNvidia('test/video')
+    collector.collect(wait_key=-1, cache_path='test.pkl')
     collector.pca_video_feature()
-    # for data in collector.data_maps:
-    #     for d in data['data']:
-    #         lm = d['video']
-    #         img = draw_mouth_landmarks(800, lm)
-    #         x = collector.pca.transform(lm)
-    #         lm = collector.pca.inverse_transform(x)
-    #         img = draw_mouth_landmarks(800, lm, (0, 0, 255), img, (0, 100))
-    #         cv2.imshow('mouth', img)
-    #         cv2.waitKey(1)
-    print(collector.data_list.shape)
+    print(collector.pca.components_.shape)
+
+    landmarks = pca_net(pca_coeff, collector.pca.components_, collector.pca.mean_)
+
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+
+        for i in range(len(collector.data_map['input'])):
+            if True:
+                d = collector.data_map
+                lm = d['output'][i]
+                img = draw_mouth_landmarks(800, np.reshape(lm, (18, 2)))
+                x = collector.pca.transform(np.reshape(lm, (1, 36)))
+                print(x)
+
+                lm = sess.run([landmarks], {pca_coeff: x})[0]
+                print(lm.shape)
+                # lm = collector.pca.inverse_transform(x)
+                img = draw_mouth_landmarks(800, np.reshape(lm, (18, 2)), (0, 0, 255), img, (0, 100))
+                cv2.imshow('mouth', img)
+                cv2.waitKey(1)
+    # print(collector.data_list.shape)
