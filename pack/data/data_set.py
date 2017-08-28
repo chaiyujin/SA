@@ -29,18 +29,16 @@ class DataSet():
             indexes[i] *= 2
             right.append(indexes[i] + 1)
         right = np.asarray(right, dtype=np.int)
-        # print(indexes)
-        # print(right)
         indexes = np.concatenate((indexes, right), axis=0)
         res = {}
         for k in self.data_:
+            if k == 'len' or k == 'path':
+                continue
             res[k] = self.data_[k][indexes]
         self.loop_i_ += 1
-        end = False
         if self.loop_i_ * self.hs_ > (self.size_ - 1) / 2:
             self.loop_i_ = 0
-            end = True
-        return res, indexes, end
+        return res, indexes
 
     def random_batch(self):
         indexes = np.random.randint(
@@ -54,6 +52,8 @@ class DataSet():
         indexes = np.concatenate((indexes, right), axis=0)
         res = {}
         for k in self.data_:
+            if k == 'len' or k == 'path':
+                continue
             res[k] = self.data_[k][indexes]
 
         return res, indexes

@@ -3,11 +3,12 @@ from __future__ import absolute_import
 import cv2
 import sys
 import numpy as np
+import matplotlib.pyplot as plt
 import tensorflow as tf
 import tensorflow.contrib.layers as tflayers
 from .adam import Adam
 from tqdm import trange
-# from ..Video.video_feature import draw_mouth_landmarks
+from ..media.video.video_feature import draw_mouth_landmarks
 
 
 def get_shape(tensor):
@@ -320,42 +321,76 @@ def printProgressBar(iteration, total, prefix='',
 
 
 class Handler():
-    def __init__(self, net, data_set):
-        self.data_set_ = data_set
+    def __init__(self, net, train_set, valid_set):
+        self.data_set_ = train_set
+        self.test_set_ = valid_set
         self.net_ = net
 
-    def train(self, sess, n_epoches, draw_mouth_landmarks, mode='loop'):
+    def train(self, sess, n_epoches, mode='loop'):
+        N_EARLY_STOP = 80
         self.sess = sess
+        best_loss = 1e6
+        early_step = N_EARLY_STOP
+        epoch_list = []
+        loss_lists = {
+            'train_p': [],
+            'valid_p': [],
+            'train_m': [],
+            'valid_m': []
+        }
         for epoch in range(n_epoches):
             if mode == 'random':
-                batch, indexes = self.data_set_.random()
-                result = self.__train_batch(batch, indexes)
+                batch, indexes = self.data_set_.random_batch()
+                train_result = self.__train_batch(batch, indexes,
+                                                  self.data_set_)
+                valid_result = self.__valid_batch(batch, indexes)
             elif mode == 'loop':
-                self.data_set_.reset_loop()
-                cnt = 0
-                result = None
-                total = self.data_set_.length_loop()
-                for i in range(total):
-                    batch, indexes, end = self.data_set_.next_batch()
-                    tmp_res = self.__train_batch(batch, indexes)
-                    result = tmp_res if result is None else (tmp_res + result)
-                    cnt += 1
-                    if end:
-                        break
-                    loss_str = '%.4f\t%.4f' %\
-                               (result[0][0] / cnt,
-                                result[1][0] / cnt)
-                    printProgressBar(i, total - 1, loss_str)
-                result /= cnt
+                train_result = self.__loop_set(self.data_set_, is_train=True)
+                valid_result = self.__loop_set(self.test_set_, is_train=False)
             # 4. print the loss
-            print('[' + str(epoch) + '/' + str(n_epoches) + ']',
-                  '%.4f' % result[0].mean(), '%.4f' % result[1].mean())
-            self.net_.saver.save(sess, 'save/my-model.pkl')
-            self.__sample_batch(batch, draw_mouth_landmarks)
+            print('[' + str(epoch) + '/' + str(n_epoches) + ']', 'train loss:'
+                  'P %.4f' % train_result[0].mean(),
+                  'M %.4f' % train_result[1].mean(), '\tvalid loss:',
+                  'P %.4f' % valid_result[0].mean(),
+                  'M %.4f' % valid_result[1].mean())
+            cur_loss = valid_result[0].mean()
+            print(cur_loss, best_loss, early_step)
+            if cur_loss < best_loss:
+                best_loss = cur_loss
+                self.net_.saver.save(sess, 'save/my-model.pkl')
+                early_step = N_EARLY_STOP
+            else:
+                early_step -= 1
+                if early_step == 0:
+                    break
+            # draw
+            epoch_list.append(epoch)
+            loss_lists['train_p'].append(train_result[0].mean())
+            loss_lists['train_m'].append(train_result[1].mean())
+            loss_lists['valid_p'].append(valid_result[0].mean())
+            loss_lists['valid_m'].append(valid_result[1].mean())
+            fig = plt.figure(figsize=(12, 12))
+            p_plt = fig.add_subplot(211)
+            m_plt = fig.add_subplot(212)
+            p_plt.title.set_text('P loss')
+            m_plt.title.set_text('M loss')
+            p_plt.plot(epoch_list, loss_lists['train_p'], 'g', label='train')
+            p_plt.plot(epoch_list, loss_lists['valid_p'], 'r', label='valid')
+            m_plt.plot(epoch_list, loss_lists['train_m'], 'g', label='train')
+            m_plt.plot(epoch_list, loss_lists['valid_m'], 'r', label='valid')
+            p_plt.legend(prop={'size': 8})
+            m_plt.legend(prop={'size': 8})
+            plt.savefig('error.png')
+            plt.clf()
+            plt.close(fig)
 
-    def __sample_batch(self, batch, draw_mouth_landmarks):
+            # self.__sample_batch(self.test_set_)
+
+    def __sample_batch(self, data_set):
+        data_set.reset_loop()
+        batch, _ = data_set.next_batch()
         res = self.predict(self.sess, batch['input'], batch['e_vector'])
-        bs = self.data_set_.bs_
+        bs = data_set.bs_
         for j in range(bs):
             pred = res[j]
             true = batch['output'][j]
@@ -367,7 +402,35 @@ class Handler():
             cv2.imshow('frame', img)
             cv2.waitKey(40)
 
-    def __train_batch(self, batch, indexes):
+    def __loop_set(self, data_set, is_train):
+        data_set.reset_loop()
+        total = data_set.length_loop()
+        cnt = 0
+        result = None
+        for i in range(total):
+            batch, indexes = data_set.next_batch()
+            if is_train:
+                tmp_res = self.__train_batch(batch, indexes, data_set)
+            else:
+                tmp_res = self.__valid_batch(batch, indexes)
+            result = tmp_res if result is None else (tmp_res + result)
+            cnt += 1
+            loss_str = '%.4f\t%.4f' %\
+                       (result[0].mean() / cnt,
+                        result[1].mean() / cnt)
+            printProgressBar(i, total - 1, loss_str)
+        result /= cnt
+        return result
+
+    def __valid_batch(self, batch, indexes):
+        feed_dict = self.net_.feed_dict(batch)
+        to_run = []
+        for i in range(len(self.net_.loss_fn_list)):
+            to_run.append(self.net_.loss_fn_list[i])
+        result = self.sess.run(to_run, feed_dict=feed_dict)
+        return np.asarray([result[0], result[1]])
+
+    def __train_batch(self, batch, indexes, data_set):
         # 1. calc loss function
         feed_dict = self.net_.feed_dict(batch)
         to_run = []
@@ -385,7 +448,7 @@ class Handler():
         # new_e = self.net_.E_optimizer.apply_gradient(
         #     batch['e_vector'], grad_E
         # )
-        # self.data_set_.adjust_e_vector(new_e, indexes)
+        # data_set.adjust_e_vector(new_e, indexes)
         # net optimizer
         self.sess.run(
             [self.net_.optimizer],  #, self.net_.pca_optimizer],

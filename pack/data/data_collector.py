@@ -3,11 +3,11 @@ import cv2
 import pickle
 import numpy as np
 from sklearn.decomposition import PCA
-from utils.dir import find_files
-from video_process import pre_process_video
-from video_process import generate_video_from_landmarks
-from video_process import mux
-from Video.video_feature import draw_mouth_landmarks
+from ..utils.dir import find_files
+from ..media.media_process import pre_process_video
+from ..media.media_process import generate_video_from_landmarks
+from ..media.media_process import mux
+from ..media.video.video_feature import draw_mouth_landmarks
 
 
 class ForNvidia():
@@ -84,17 +84,19 @@ class ForNvidia():
                     cv2.waitKey(wait_key)
             print('->Get', len(data))
             e_vector = np.random.normal(loc=loc, scale=scale, size=(E))
-            for i in range(len(data)):
+            for i in range(int(len(data) / 2)):
                 if np.random.rand(1)[0] < 0.2:
                     data_map = self.valid_data
                 else:
                     data_map = self.train_data
-                data_map['input'].append(
-                    np.expand_dims(data[i]['audio'], -1))
-                data_map['output'].append(data[i]['video'].flatten())
-                data_map['e_vector'].append(e_vector)
-                data_map['path'].append(result['path'])
-                data_map['len'] += 1
+                for j in range(2):
+                    data_map['input'].append(
+                        np.expand_dims(data[i * 2 + j]['audio'], -1))
+                    data_map['output'].append(
+                        data[i * 2 + j]['video'].flatten())
+                    data_map['e_vector'].append(e_vector)
+                    data_map['path'].append(result['path'])
+                    data_map['len'] += 1
 
         for k in self.train_data:
             if k == 'path' or k == 'len':
