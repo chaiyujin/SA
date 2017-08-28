@@ -8,11 +8,11 @@ from Video.video_feature import draw_mouth_landmarks
 
 
 video_path = 'F:/dataset/GRID/video/s1/video/mpg_6000'
-video_path = 'test/video'
+# video_path = 'test/video'
 bs = 2
 # process data
 collector = ForNvidia(video_path)
-all_data, data_size = collector.collect(cache_path='test.pkl')
+all_data, data_size = collector.collect(cache_path='data_s1.pkl')
 collector.pca_video_feature()
 print(collector.pca.components_.shape)
 print(all_data['input'][0].shape)
@@ -29,10 +29,10 @@ net = Net(x, y, e, collector.pca.components_, collector.pca.mean_)
 trainer = Handler(net, data_set)
 
 with tf.Session() as sess:
-    # sess.run(tf.global_variables_initializer())
-    # trainer.train(sess, int(800 * data_size / bs), draw_mouth_landmarks)
+    sess.run(tf.global_variables_initializer())
+    trainer.train(sess, 200, draw_mouth_landmarks)
 
-    trainer.restore(sess, 'save_backup/my-model.pkl')
+    # trainer.restore(sess, 'save_backup/my-model.pkl')
     for i in range(int(data_size / bs)):
         res = trainer.predict(
             sess,

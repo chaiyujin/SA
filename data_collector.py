@@ -31,15 +31,18 @@ class ForNvidia():
         if (not force_replace) and cache_path and os.path.exists(cache_path):
             with open(cache_path, 'rb') as file:
                 res = pickle.load(file)
-                self.data_map = res[0]
+                self.train_data = res[0]
+                self.valid_data = res[1]
                 self._all_video_feature = res[2]
                 return res[0], res[1]
         print('Collecting data from:', self._input_dir)
-        self.data_map = {
-            'input': [],
-            'output': [],
-            'e_vector': [],
-            'path': []
+        self.train_data = {
+            'input': [], 'output': [],
+            'e_vector': [], 'path': [], 'len': 0
+        }
+        self.valid_data = {
+            'input': [], 'output': [],
+            'e_vector': [], 'path': [], 'len': 0
         }
         self._all_video_feature = []
         lists = find_files(self._input_dir, self._ext)
@@ -82,26 +85,37 @@ class ForNvidia():
             print('->Get', len(data))
             e_vector = np.random.normal(loc=loc, scale=scale, size=(E))
             for i in range(len(data)):
-                self.data_map['input'].append(
+                if np.random.rand(1)[0] < 0.2:
+                    data_map = self.valid_data
+                else:
+                    data_map = self.train_data
+                data_map['input'].append(
                     np.expand_dims(data[i]['audio'], -1))
-                self.data_map['output'].append(data[i]['video'].flatten())
-                self.data_map['e_vector'].append(e_vector)
-                self.data_map['path'].append(result['path'])
+                data_map['output'].append(data[i]['video'].flatten())
+                data_map['e_vector'].append(e_vector)
+                data_map['path'].append(result['path'])
+                data_map['len'] += 1
 
-        for k in self.data_map:
-            self.data_map[k] = np.asarray(self.data_map[k])
+        for k in self.train_data:
+            if k == 'path' or k == 'len':
+                continue
+            self.train_data[k] = np.asarray(self.train_data[k])
+            self.valid_data[k] = np.asarray(self.valid_data[k])
+
+        print(self.train_data['len'])
+        print(self.valid_data['len'])
 
         if cache_path:
             with open(cache_path, 'wb') as f:
                 pickle.dump(
                     (
-                        self.data_map,
-                        len(self.data_map['input']),
+                        self.train_data,
+                        self.valid_data,
                         self._all_video_feature
                     ),
                     f
                 )
-        return self.data_map, len(self.data_map['input'])
+        return self.train_data, self.valid_data
 
     def pca_video_feature(self):
         self.pca = PCA(n_components=0.97, svd_solver='full')
@@ -109,6 +123,9 @@ class ForNvidia():
 
 
 if __name__ == '__main__':
+    collector = ForNvidia('test/video')
+    collector.collect()
+
     import tensorflow as tf
     import tensorflow.contrib.layers as tflayers
 
@@ -139,9 +156,9 @@ if __name__ == '__main__':
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
 
-        for i in range(len(collector.data_map['input'])):
+        for i in range(len(collector.train_data['input'])):
             if True:
-                d = collector.data_map
+                d = collector.train_data
                 lm = d['output'][i]
                 img = draw_mouth_landmarks(800, np.reshape(lm, (18, 2)))
                 x = collector.pca.transform(np.reshape(lm, (1, 36)))

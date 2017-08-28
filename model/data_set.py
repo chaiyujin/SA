@@ -1,3 +1,5 @@
+from __future__ import division
+
 import numpy as np
 
 
@@ -10,6 +12,12 @@ class DataSet():
         self.hs_ = int(batch_size / 2)
         # for next batch()
         self.loop_i_ = 0
+
+    def reset_loop(self):
+        self.loop_i_ = 0
+
+    def length_loop(self):
+        return int(self.size_ / 2 / self.hs_)
 
     def next_batch(self):
         indexes = [int(d % int((self.size_ - 1) / 2)) for d in range(
@@ -28,9 +36,11 @@ class DataSet():
         for k in self.data_:
             res[k] = self.data_[k][indexes]
         self.loop_i_ += 1
+        end = False
         if self.loop_i_ * self.hs_ > (self.size_ - 1) / 2:
             self.loop_i_ = 0
-        return res, indexes
+            end = True
+        return res, indexes, end
 
     def random_batch(self):
         indexes = np.random.randint(

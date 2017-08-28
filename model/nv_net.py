@@ -6,6 +6,8 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.layers as tflayers
 from .adam import Adam
+from tqdm import trange
+# from ..Video.video_feature import draw_mouth_landmarks
 
 
 def get_shape(tensor):
@@ -228,7 +230,6 @@ class LossRegularizer():
             (1 - self.decay_) * (loss ** 2).mean()
         self.beta_t_ *= self.decay_
         v_hat = self.v_ / (1 - self.beta_t_)
-        print('update', 1 / (np.sqrt(v_hat) + 1e-8))
         # update feed_dict
         self.feed_dict = {
             self.scale: np.asarray(
@@ -296,58 +297,105 @@ class Net():
             reg.update(loss)
 
 
+def printProgressBar(iteration, total, prefix='',
+                     suffix='', decimals=1, length=20, fill='█'):
+    """
+    Call in a loop to create terminal progress bar
+    @params:
+        iteration   - Required  : current iteration (Int)
+        total       - Required  : total iterations (Int)
+        prefix      - Optional  : prefix string (Str)
+        suffix      - Optional  : suffix string (Str)
+        decimals    - Optional  : positive number of decimals in percent complete (Int)
+        length      - Optional  : character length of bar (Int)
+        fill        - Optional  : bar fill character (Str)
+    """
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filledLength = int(length * iteration // total)
+    bar = fill * filledLength + '-' * (length - filledLength)
+    print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end = '\r')
+    # Print New Line on Complete
+    if iteration == total: 
+        print()
+
+
 class Handler():
     def __init__(self, net, data_set):
         self.data_set_ = data_set
         self.net_ = net
 
-    def train(self, sess, n_epoches, draw_mouth_landmarks):
+    def train(self, sess, n_epoches, draw_mouth_landmarks, mode='loop'):
+        self.sess = sess
         for epoch in range(n_epoches):
-            batch, indexes = self.data_set_.next_batch()
-            # 1. calc loss function
-            feed_dict = self.net_.feed_dict(batch)
-            to_run = []
-            for i in range(len(self.net_.loss_fn_list)):
-                to_run.append(self.net_.loss_fn_list[i])
-            to_run.extend([
-                # self.net_.grad_E,
-                self.net_.loss
-            ])
-            # to_run = [self.net_.pca, self.net_.loss]
-            result = sess.run(to_run, feed_dict=feed_dict)
-            # 2. optimize e vector
-            # grad_E = result[-2]
-            # # e vector optimizer
-            # new_e = self.net_.E_optimizer.apply_gradient(
-            #     batch['e_vector'], grad_E
-            # )
-            # self.data_set_.adjust_e_vector(new_e, indexes)
-            # net optimizer
-            sess.run(
-                [self.net_.optimizer],  #, self.net_.pca_optimizer],
-                feed_dict=feed_dict
-            )    
-            # 3. update the loss regularizer
-            self.net_.update_loss_regularizer(
-                result[:len(self.net_.loss_fn_list)]
-            )
+            if mode == 'random':
+                batch, indexes = self.data_set_.random()
+                result = self.__train_batch(batch, indexes)
+            elif mode == 'loop':
+                self.data_set_.reset_loop()
+                cnt = 0
+                result = None
+                total = self.data_set_.length_loop()
+                for i in range(total):
+                    batch, indexes, end = self.data_set_.next_batch()
+                    tmp_res = self.__train_batch(batch, indexes)
+                    result = tmp_res if result is None else (tmp_res + result)
+                    cnt += 1
+                    if end:
+                        break
+                    loss_str = '%.4f\t%.4f' %\
+                               (result[0][0] / cnt,
+                                result[1][0] / cnt)
+                    printProgressBar(i, total - 1, loss_str)
+                result /= cnt
             # 4. print the loss
             print('[' + str(epoch) + '/' + str(n_epoches) + ']',
                   '%.4f' % result[0].mean(), '%.4f' % result[1].mean())
-            if epoch % 100 == 0:
-                self.net_.saver.save(sess, 'save/my-model.pkl')
-                res = self.predict(sess, batch['input'], batch['e_vector'])
-                bs = self.data_set_.bs_
-                for j in range(bs):
-                    pred = res[j]
-                    true = batch['output'][j]
-                    pred = np.reshape(pred, (18, 2))
-                    true = np.reshape(true, (18, 2))
+            self.net_.saver.save(sess, 'save/my-model.pkl')
+            self.__sample_batch(batch, draw_mouth_landmarks)
 
-                    img = draw_mouth_landmarks(800, pred)
-                    img = draw_mouth_landmarks(800, true, (0, 0, 255), img, (0, 100))
-                    cv2.imshow('frame', img)
-                    cv2.waitKey(40)
+    def __sample_batch(self, batch, draw_mouth_landmarks):
+        res = self.predict(self.sess, batch['input'], batch['e_vector'])
+        bs = self.data_set_.bs_
+        for j in range(bs):
+            pred = res[j]
+            true = batch['output'][j]
+            pred = np.reshape(pred, (18, 2))
+            true = np.reshape(true, (18, 2))
+
+            img = draw_mouth_landmarks(800, pred)
+            img = draw_mouth_landmarks(800, true, (0, 0, 255), img, (0, 100))
+            cv2.imshow('frame', img)
+            cv2.waitKey(40)
+
+    def __train_batch(self, batch, indexes):
+        # 1. calc loss function
+        feed_dict = self.net_.feed_dict(batch)
+        to_run = []
+        for i in range(len(self.net_.loss_fn_list)):
+            to_run.append(self.net_.loss_fn_list[i])
+        to_run.extend([
+            # self.net_.grad_E,
+            self.net_.loss
+        ])
+        # to_run = [self.net_.pca, self.net_.loss]
+        result = self.sess.run(to_run, feed_dict=feed_dict)
+        # 2. optimize e vector
+        # grad_E = result[-2]
+        # # e vector optimizer
+        # new_e = self.net_.E_optimizer.apply_gradient(
+        #     batch['e_vector'], grad_E
+        # )
+        # self.data_set_.adjust_e_vector(new_e, indexes)
+        # net optimizer
+        self.sess.run(
+            [self.net_.optimizer],  #, self.net_.pca_optimizer],
+            feed_dict=feed_dict
+        )    
+        # 3. update the loss regularizer
+        self.net_.update_loss_regularizer(
+            result[:len(self.net_.loss_fn_list)]
+        )
+        return np.asarray([result[0], result[1]])
 
     def predict(self, sess, input, e_vector):
         to_run = [self.net_.pred]
