@@ -57,10 +57,22 @@ def demux_video(video_path, clear_old=False):
     return {'video_path': v_path, 'audio_path': w_path}
 
 
+def upsample_video_feature(video_path, upsampling_rate):
+    init_dde()
+    low_rate_lm = landmark_feature(video_path, only_mouth=True)
+    lm_feature = []
+    for i in range(len(low_rate_lm) - 1):
+        left = low_rate_lm[i]
+        delta = low_rate_lm[i + 1] - left
+        for k in range(upsampling_rate):
+            lm_feature.append(left + delta * k / upsampling_rate)
+    lm_feature.append(low_rate_lm[-1])  # the last one
+    return np.asarray(lm_feature, np.float32)
+
+
 def pre_process_video(video_path, audio_feature='mfcc',
                       winlen=0.025, winstep=0.01, **kwarg):
     # upsampling video feature
-    init_dde()
     video_path = os.path.abspath(video_path)
     video_path = video_path.replace('\\', '/')
     path = demux_video(video_path)
@@ -70,14 +82,7 @@ def pre_process_video(video_path, audio_feature='mfcc',
         raise ValueError('Upsampling rate is not integer.')
     upsampling_rate = int(upsampling_rate)
     print('Fetching video feature...')
-    low_rate_lm = landmark_feature(path['video_path'], only_mouth=True)
-    lm_feature = []
-    for i in range(len(low_rate_lm) - 1):
-        left = low_rate_lm[i]
-        delta = low_rate_lm[i + 1] - left
-        for k in range(upsampling_rate):
-            lm_feature.append(left + delta * k / upsampling_rate)
-    lm_feature.append(low_rate_lm[-1])  # the last one
+    lm_feature = upsample_video_feature(path['video_path'], upsampling_rate)
 
     # audio feature
     print('Fetching audio feature...')
@@ -147,6 +152,20 @@ def generate_video_from_landmarks(landmark_seq, video_path):
     out = cv2.VideoWriter(video_path, fourcc, VIDEO_FPS, (W, W))
     for i, frame in enumerate(landmark_seq):
         img = draw_mouth_landmarks(W, frame)
+        out.write(img)
+    out.release()
+
+
+def generate_compare_video(pred_lms, true_lms, video_path):
+    global VIDEO_FPS
+    global W
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter(video_path, fourcc, VIDEO_FPS, (W, W))
+    for i in range(len(pred_lms)):
+        frame = pred_lms[i]
+        img = draw_mouth_landmarks(W, frame)
+        frame = true_lms[i]
+        img = draw_mouth_landmarks(W, frame, (0, 0, 255), img)
         out.write(img)
     out.release()
 

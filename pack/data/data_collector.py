@@ -2,12 +2,14 @@ import os
 import cv2
 import pickle
 import numpy as np
+from scipy.io import wavfile
 from sklearn.decomposition import PCA
 from ..utils.dir import find_files
-from ..media.media_process import pre_process_video
+from ..media.media_process import pre_process_video, upsample_video_feature
 from ..media.media_process import generate_video_from_landmarks
-from ..media.media_process import mux
+from ..media.media_process import mux, demux_video
 from ..media.video.video_feature import draw_mouth_landmarks
+from ..media.audio.feature.audio_feature import lpc_feature
 
 
 class ForNvidia():
@@ -24,6 +26,33 @@ class ForNvidia():
         self._aframe = audio_n_frame
         self._feature_gap = feature_gap
         self.pca = None
+
+    def slice_media(self, video_path, fps=25.0):
+        path = demux_video(video_path)
+        audio_path = path['audio_path']
+        video_path = path['video_path']
+        # video
+        lm_feature = upsample_video_feature(video_path, 1)
+        lm_feature -= lm_feature.mean()
+        # audio
+        rate, audio = wavfile.read(audio_path)
+        pad_length = int(rate * 0.26)
+        zeros = np.full((pad_length), 1e-6)
+        audio = np.concatenate((zeros, audio), axis=0)
+        audio = np.concatenate((audio, zeros), axis=0)
+        a_feature = lpc_feature(audio, rate,
+                                winlen=self._wlen, winstep=self._wstep,
+                                k=self._k, preemphsis=self._pre_e)
+        feature_gap = int(1 / (fps * self._wstep))
+        length = len(a_feature) - self._aframe
+        a_feature = np.asarray(a_feature, np.float32)
+        slices = []
+        for i in range(0, length, feature_gap):
+            l = i
+            r = l + self._aframe
+            slices.append(a_feature[l: r, 1:])
+        slices = np.expand_dims(np.asarray(slices), -1)
+        return slices, lm_feature, audio_path
 
     def collect(self, loc=0.0, scale=0.01, E=24,
                 keep_even=True, wait_key=-1,
@@ -48,6 +77,12 @@ class ForNvidia():
         lists = find_files(self._input_dir, self._ext)
         for count, path in enumerate(lists):
             print('[' + str(count) + '/' + str(len(lists)) + ']')
+
+            if np.random.rand(1)[0] < 0.2:
+                data_map = self.valid_data
+            else:
+                data_map = self.train_data
+
             result = pre_process_video(
                         path, 'lpc', winlen=self._wlen,
                         winstep=self._wstep, k=self._k, pre_e=self._pre_e)
@@ -85,10 +120,6 @@ class ForNvidia():
             print('->Get', len(data))
             e_vector = np.random.normal(loc=loc, scale=scale, size=(E))
             for i in range(int(len(data) / 2)):
-                if np.random.rand(1)[0] < 0.2:
-                    data_map = self.valid_data
-                else:
-                    data_map = self.train_data
                 for j in range(2):
                     data_map['input'].append(
                         np.expand_dims(data[i * 2 + j]['audio'], -1))
@@ -104,8 +135,8 @@ class ForNvidia():
             self.train_data[k] = np.asarray(self.train_data[k])
             self.valid_data[k] = np.asarray(self.valid_data[k])
 
-        print(self.train_data['len'])
-        print(self.valid_data['len'])
+        print('Train data:', self.train_data['len'])
+        print('Valid data:', self.valid_data['len'])
 
         if cache_path:
             with open(cache_path, 'wb') as f:
@@ -119,8 +150,8 @@ class ForNvidia():
                 )
         return self.train_data, self.valid_data
 
-    def pca_video_feature(self):
-        self.pca = PCA(n_components=0.97, svd_solver='full')
+    def pca_video_feature(self, percentage=0.99):
+        self.pca = PCA(n_components=percentage, svd_solver='full')
         self.pca.fit(self._all_video_feature)
 
 

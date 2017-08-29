@@ -1,22 +1,24 @@
-import cv2
+import os
+import argparse
 import numpy as np
 import tensorflow as tf
 from pack.data.data_collector import ForNvidia
 from pack.data.data_set import DataSet
 from pack.model.nv_net import Net, Handler
-from pack.media.video.video_feature import draw_mouth_landmarks
 
+parser = argparse.ArgumentParser()
+parser.add_argument('-t', '--train', action='store_true')
+args = parser.parse_args()
 
 video_path = 'F:/dataset/GRID/video/s1/video/mpg_6000'
-# video_path = 'test/video'
-bs = 32
+a_path = 'F:/dataset/GRID/video/s1/video/mpg_6000/normalized-bgbh5s.wav'
+v_path = 'F:/dataset/GRID/video/s1/video/mpg_6000/bgbh5s.mpg'
+video_path = 'test/video'
+bs = 2
 # process data
 collector = ForNvidia(video_path)
-train_data, valid_data = collector.collect(cache_path='data_s1.pkl')
-collector.pca_video_feature()
-print(collector.pca.components_.shape)
-print(train_data['input'][0].shape)
-print(train_data['output'][0].shape)
+train_data, valid_data = collector.collect(cache_path='test.pkl')
+collector.pca_video_feature(0.99)
 data_set = DataSet(train_data, train_data['len'], bs)
 test_set = DataSet(valid_data, valid_data['len'], bs)
 # print(data_set.random_batch())
@@ -30,24 +32,19 @@ net = Net(x, y, e, collector.pca.components_, collector.pca.mean_)
 trainer = Handler(net, data_set, test_set)
 
 with tf.Session() as sess:
-    sess.run(tf.global_variables_initializer())
-    trainer.train(sess, 800)
+    if args.train:
+        trainer.set_learning_rate(lr=1e-4, pca_lr=1e-12)
+        trainer.init_variables(sess)
+        trainer.train(sess, 200)
+    else:
+        trainer.restore(sess, 'save/my-model.pkl')
 
-    # trainer.restore(sess, 'save/my-model.pkl')
-    for i in range(int(train_data['len'] / bs)):
-        res = trainer.predict(
-            sess,
-            train_data['input'][i * bs: (i + 1) * bs],
-            train_data['e_vector'][i * bs: (i + 1) * bs]
-        )
-        print(res.shape)
-        for j in range(bs):
-            pred = res[j]
-            true = train_data['output'][i * bs + j]
-            pred = np.reshape(pred, (18, 2))
-            true = np.reshape(true, (18, 2))
-
-            img = draw_mouth_landmarks(800, pred)
-            img = draw_mouth_landmarks(800, true, (0, 0, 255), img, (0, 100))
-            cv2.imshow('frame', img)
-            cv2.waitKey()
+    for i in range(10):
+        length = len(valid_data['path'])
+        idx = np.random.randint(0, length, (1))[0]
+        video_path = valid_data['path'][idx]['video_path']
+        audio_slices, video_slices, a_path = collector.slice_media(video_path)
+        video_name = os.path.splitext(video_path)[0].split('/')[-1]
+        print(video_name)
+        trainer.sample(sess, audio_slices, video_slices,
+                       a_path, 'sample/' + video_name)

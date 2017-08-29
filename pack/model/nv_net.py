@@ -1,5 +1,6 @@
 from __future__ import absolute_import
 
+import os
 import cv2
 import sys
 import numpy as np
@@ -9,6 +10,8 @@ import tensorflow.contrib.layers as tflayers
 from .adam import Adam
 from tqdm import trange
 from ..media.video.video_feature import draw_mouth_landmarks
+from ..media.media_process import generate_video_from_landmarks
+from ..media.media_process import generate_compare_video, mux
 
 
 def get_shape(tensor):
@@ -267,18 +270,21 @@ class Net():
         #     labels=self.output,
         #     predictions=self.pred
         # )
-        # optimizer
-        self.optimizer = tf.train.AdamOptimizer(1e-4).minimize(
-            self.loss, var_list=self.var_list
-        )
-        self.pca_optimizer = tf.train.AdamOptimizer(1e-12).minimize(
-            self.loss, var_list=self.pca_var
-        )
         # gradient for e
         # self.grad_E = tf.gradients(self.loss, [e_vector])[0]
         # self.E_optimizer = Adam(1e-8)
 
         self.saver = tf.train.Saver()
+
+    def set_optimizer(self, lr=1e-4, pca_lr=1e-12):
+        # optimizer
+        self.optimizer = tf.train.AdamOptimizer(lr).minimize(
+            self.loss, var_list=self.var_list
+        )
+        self.pca_optimizer = tf.train.AdamOptimizer(pca_lr).minimize(
+            self.loss, var_list=self.pca_var
+        )
+        self.optimizer_list = [self.optimizer, self.pca_optimizer]
 
     def feed_dict(self, batch):
         feed = {
@@ -326,6 +332,12 @@ class Handler():
         self.test_set_ = valid_set
         self.net_ = net
 
+    def set_learning_rate(self, lr=1e-4, pca_lr=1e-12):
+        self.net_.set_optimizer(lr, pca_lr)
+
+    def init_variables(self, sess):
+        sess.run(tf.global_variables_initializer())
+
     def train(self, sess, n_epoches, mode='loop'):
         N_EARLY_STOP = 80
         self.sess = sess
@@ -338,6 +350,7 @@ class Handler():
             'train_m': [],
             'valid_m': []
         }
+
         for epoch in range(n_epoches):
             if mode == 'random':
                 batch, indexes = self.data_set_.random_batch()
@@ -471,6 +484,52 @@ class Handler():
 
     def restore(self, sess, path='save/my-model.pkl'):
         self.net_.saver.restore(sess, path)
+
+    def sample(self, sess, audio_slices, video_slices, a_path, name_prefix):
+        bs = int(self.net_.input.get_shape()[0])
+        result = []
+        for i in range(int(audio_slices.shape[0] / bs + 1)):
+            indexes = [int(d % audio_slices.shape[0])
+                       for d in range(i * bs, (i + 1) * bs)]
+            audio = audio_slices[indexes]
+            res = self.predict(
+                sess, audio, np.zeros((bs, 24))
+            )
+            for j in range(bs):
+                if i * bs + j != indexes[j]:
+                    break
+                pred = res[j]
+                pred = np.reshape(pred, (18, 2))
+                result.append(pred)
+                true = video_slices[indexes[j]]
+                # true = np.reshape(true, (18, 2))
+
+                img = draw_mouth_landmarks(800, pred)
+                img = draw_mouth_landmarks(800, true, (0, 0, 255), img, (0, 100))
+                cv2.imshow('frame', img)
+                cv2.waitKey(1)
+        assert(audio_slices.shape[0] == len(result))
+
+        pred_name = name_prefix + '_pred.mp4'
+        true_name = name_prefix + '_true.mp4'
+        comp_name = name_prefix + '_comp.mp4'
+        if os.path.exists(pred_name):
+            os.remove(pred_name)
+        if os.path.exists(true_name):
+            os.remove(true_name)
+        if os.path.exists(comp_name):
+            os.remove(comp_name)
+        if os.path.exists('tmp.avi'):
+            os.remove('tmp.avi')
+        generate_video_from_landmarks(result, 'tmp.avi')
+        mux(a_path, 'tmp.avi', pred_name)
+        os.remove('tmp.avi')
+        generate_video_from_landmarks(video_slices, 'tmp.avi')
+        mux(a_path, 'tmp.avi', true_name)
+        os.remove('tmp.avi')
+        generate_compare_video(result, video_slices, 'tmp.avi')
+        mux(a_path, 'tmp.avi', comp_name)
+        os.remove('tmp.avi')
 
 
 if __name__ == '__main__':

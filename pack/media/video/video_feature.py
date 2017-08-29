@@ -29,16 +29,16 @@ def init_dde(dde_path=DDE_PATH):
         g_dde_inited = True
 
 
-def draw_line(zeros, points, delta=0):
+def draw_line(zeros, points, delta=0, color=(150, 150, 150)):
     for i in range(46 + delta, 57 + delta):
-        cv2.line(zeros, points[i], points[i + 1], (150, 150, 150), 1)
+        cv2.line(zeros, points[i], points[i + 1], color, 1)
     for i in range(58 + delta, 60 + delta):
-        cv2.line(zeros, points[i], points[i + 1], (150, 150, 150), 1)
+        cv2.line(zeros, points[i], points[i + 1], color, 1)
     for i in range(61 + delta, 63 + delta):
-        cv2.line(zeros, points[i], points[i + 1], (150, 150, 150), 1)
+        cv2.line(zeros, points[i], points[i + 1], color, 1)
     for i, j in zip([46 + delta, 46 + delta, 46 + delta, 52 + delta, 52 + delta],
                     [57 + delta, 58 + delta, 63 + delta, 60 + delta, 61 + delta]):
-        cv2.line(zeros, points[i], points[j], (150, 150, 150), 1)
+        cv2.line(zeros, points[i], points[j], color, 1)
 
 
 def draw_mouth_landmarks(W, lm, color=(0, 255, 0), img=None, delta=(0, 0)):
@@ -50,7 +50,7 @@ def draw_mouth_landmarks(W, lm, color=(0, 255, 0), img=None, delta=(0, 0)):
         y = int(lm[i][1] + W / 2) + delta[1]
         points.append((x, y))
         cv2.circle(img, (x, y), 1, color, 2)
-    draw_line(img, points, -46)
+    draw_line(img, points, -46, color)
     return img
 
 
