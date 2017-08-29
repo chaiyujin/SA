@@ -26,21 +26,25 @@ x = tf.placeholder(tf.float32, [bs, 64, 32, 1])
 y = tf.placeholder(tf.float32, [bs, 36])
 e = tf.placeholder(tf.float32, [bs, 24])
 
-net = Net(x, y, e, collector.pca.components_, collector.pca.mean_)
-trainer = Handler(net, data_set, test_set)
 
 with tf.Session() as sess:
     if args.train:
+        net = Net(x, y, e, collector.pca.components_,
+                  collector.pca.mean_, 0.5)
+        trainer = Handler(net, data_set, test_set)
         trainer.set_learning_rate(lr=1e-4, pca_lr=1e-12)
         trainer.init_variables(sess)
         trainer.train(sess, 800)
     else:
+        net = Net(x, y, e, collector.pca.components_,
+                  collector.pca.mean_, 0)
+        trainer = Handler(net, data_set, test_set)
         trainer.restore(sess, 'save/my-model.pkl')
 
     for i in range(10):
-        length = len(valid_data['path'])
+        length = len(train_data['path'])
         idx = np.random.randint(0, length, (1))[0]
-        video_path = valid_data['path'][idx]['video_path']
+        video_path = train_data['path'][idx]['video_path']
         audio_slices, video_slices, a_path = collector.slice_media(video_path)
         video_name = os.path.splitext(video_path)[0].split('/')[-1]
         print(video_name)

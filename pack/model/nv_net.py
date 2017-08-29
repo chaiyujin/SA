@@ -34,7 +34,7 @@ def lrelu(x, leak=0.2, name="lrelu"):
         return f1 * x + f2 * abs(x)
 
 
-def audio_abstraction_net(input):
+def audio_abstraction_net(input, drop):
     scope = sys._getframe().f_code.co_name
     with tf.variable_scope(scope):
         # input: 64 x 32 x 1
@@ -56,7 +56,11 @@ def audio_abstraction_net(input):
         print()
         layer = [input]
         for i, layer_config in enumerate(layers_config):
-            output = tflayers.conv2d(layer[i], **layer_config)
+            if drop > 0:
+                layer_input = tflayers.dropout(layer[i], 1 - drop)
+            else:
+                layer_input = layer[i]
+            output = tflayers.conv2d(layer_input, **layer_config)
             layer.append(output)
             # print shape
             print_shape(output, '\tlayer' + str(i) + ' output')
@@ -69,7 +73,7 @@ def audio_abstraction_net(input):
     return layer[-1], var_list
 
 
-def articulation_net(audio_feature, e_vector):
+def articulation_net(audio_feature, e_vector, drop):
     def concat_kernel(x, y):
         return x
         tile = get_shape(x)
@@ -103,8 +107,11 @@ def articulation_net(audio_feature, e_vector):
         layer = [audio_feature]
         for i, layer_config in enumerate(layers_config):
             # conv2d
-            output = tflayers.conv2d(layer[i], **layer_config)
-            output = tflayers.dropout(output, 0.7)
+            if drop > 0:
+                layer_input = tflayers.dropout(layer[i], 1 - drop)
+            else:
+                layer_input = layer[i]
+            output = tflayers.conv2d(layer_input, **layer_config)
             # concat with e_vector
             concated = concat_kernel(output, e_vector)
             layer.append(concated)
@@ -245,9 +252,10 @@ class LossRegularizer():
 
 
 class Net():
-    def __init__(self, input, output, e_vector, init_pca, init_mean):
-        audio_feature, var_list0 = audio_abstraction_net(input)
-        anime_feature, var_list1 = articulation_net(audio_feature, e_vector)
+    def __init__(self, input, output, e_vector, init_pca, init_mean, drop):
+        audio_feature, var_list0 = audio_abstraction_net(input, drop)
+        anime_feature, var_list1 = articulation_net(audio_feature, e_vector,
+                                                    drop)
         pca_coeff, landmarks_pred, var_list2, var_list3 =\
             output_net(anime_feature, init_pca, init_mean)
         var_list0.extend(var_list1)
@@ -417,7 +425,7 @@ class Handler():
             cv2.waitKey(40)
 
     def __loop_set(self, data_set, is_train):
-        data_set.reset_loop()
+        data_set.reset_loop(is_random=is_train)
         total = data_set.length_loop()
         cnt = 0
         result = None

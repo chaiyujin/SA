@@ -13,16 +13,26 @@ class DataSet():
         # for next batch()
         self.loop_i_ = 0
 
-    def reset_loop(self):
+    def reset_loop(self, is_random=False):
         self.loop_i_ = 0
+        self.loop_idx_ = [i for i in range(int((self.size_ - 1) / 2))]
+        if is_random:
+            for i in range(int(self.size_ / 2)):
+                x = np.random.randint(0, len(self.loop_idx_))
+                y = np.random.randint(0, len(self.loop_idx_))
+                if x != y:
+                    t = self.loop_idx_[x]
+                    self.loop_idx_[x] = self.loop_idx_[y]
+                    self.loop_idx_[y] = t
 
     def length_loop(self):
         return int(self.size_ / 2 / self.hs_)
 
     def next_batch(self):
-        indexes = [int(d % int((self.size_ - 1) / 2)) for d in range(
-            self.loop_i_ * self.hs_,
-            (self.loop_i_ + 1) * self.hs_
+        indexes = [self.loop_idx_[int(d % int((self.size_ - 1) / 2))]
+                   for d in range(
+                    self.loop_i_ * self.hs_,
+                    (self.loop_i_ + 1) * self.hs_
         )]
         right = []
         for i in range(len(indexes)):
