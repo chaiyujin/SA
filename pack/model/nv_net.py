@@ -104,6 +104,7 @@ def articulation_net(audio_feature, e_vector):
         for i, layer_config in enumerate(layers_config):
             # conv2d
             output = tflayers.conv2d(layer[i], **layer_config)
+            output = tflayers.dropout(output, 0.7)
             # concat with e_vector
             concated = concat_kernel(output, e_vector)
             layer.append(concated)
