@@ -123,7 +123,7 @@ def lpc(signal, order):
 
 
 def lpc_coefficient(signal, k=4, preemphsis=0.63):
-    x1 = signal * hamming(len(signal))
+    x1 = signal * np.hamming(len(signal))
     if preemphsis is not None:
         x1 = lfilter([1], [1., preemphsis], x1)
     ncoeff = k * 2
@@ -149,7 +149,7 @@ def formant(lpc_coefficient, samplerate=16000):
 
 
 def lpc_feature(signal, samplerate=16000, winlen=0.025, winstep=0.01,
-                k=4, preemphsis=None, winfunc=np.hamming):
+                k=4, preemphsis=None, winfunc=np.ones):
     # 1. framing
     frame_length, frame_step = winlen * samplerate, winstep * samplerate
     frame_length = int(round(frame_length))
@@ -170,7 +170,7 @@ def lpc_feature(signal, samplerate=16000, winlen=0.025, winstep=0.01,
     frames = pad_signal[indices.astype(np.int32, copy=False)]
 
     # 2. Window
-    frames *= np.hamming(frame_length)
+    frames *= winfunc(frame_length)
 
     ret = []
     for i in range(len(frames)):

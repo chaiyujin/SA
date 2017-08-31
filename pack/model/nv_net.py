@@ -10,7 +10,7 @@ import tensorflow as tf
 import tensorflow.contrib.layers as tflayers
 from .adam import Adam
 from tqdm import trange
-from ..media.video.video_feature import draw_mouth_landmarks
+from ..media.video.video_feature import draw_mouth_landmarks, draw_landmarks
 from ..media.media_process import generate_video_from_landmarks
 from ..media.media_process import generate_compare_video, mux
 
@@ -57,11 +57,13 @@ def audio_abstraction_net(input, drop):
         print()
         layer = [input]
         for i, layer_config in enumerate(layers_config):
+            # if drop > 0:
+            #     layer_input = tflayers.dropout(layer[i], 1 - drop)
+            # else:
+            #     layer_input = layer[i]
+            output = tflayers.conv2d(layer[i], **layer_config)
             if drop > 0:
-                layer_input = tflayers.dropout(layer[i], 1 - drop)
-            else:
-                layer_input = layer[i]
-            output = tflayers.conv2d(layer_input, **layer_config)
+                output = tflayers.dropout(output, 1 - drop)
             layer.append(output)
             # print shape
             print_shape(output, '\tlayer' + str(i) + ' output')
@@ -107,11 +109,9 @@ def articulation_net(audio_feature, e_vector, drop):
         layer = [audio_feature]
         for i, layer_config in enumerate(layers_config):
             # conv2d
+            output = tflayers.conv2d(layer[i], **layer_config)
             if drop > 0:
-                layer_input = tflayers.dropout(layer[i], 1 - drop)
-            else:
-                layer_input = layer[i]
-            output = tflayers.conv2d(layer_input, **layer_config)
+                output = tflayers.dropout(output, 1 - drop)
             # output = tflayers.layer_norm(output)
             # tf.summary.scalar('conv2d' + str(i), tf.reduce_mean(output))
             # e_vector = tflayers.layer_norm(e_vector)
@@ -274,7 +274,7 @@ class LossRegularizer():
 
 class Net():
     def __init__(self, input, output, e_vector, init_pca, init_mean, drop):
-        audio_feature, var_list0 = audio_abstraction_net(input, 0)
+        audio_feature, var_list0 = audio_abstraction_net(input, drop)
         anime_feature, var_list1 = articulation_net(audio_feature, e_vector,
                                                     drop)
         pca_coeff, landmarks_pred, var_list2, var_list3 =\
@@ -442,12 +442,17 @@ class Handler():
             plt.clf()
             plt.close(fig)
 
-            # self.__sample_batch(self.test_set_)
+            if epoch % 10 == 0:
+                self.__sample_batch(self.data_set_)
         # self.save_train_set()
 
     def save_e_vector(self, path='e_vector.pkl'):
         with open(path, 'wb') as file:
             pickle.dump(self.data_set_.data_['e_vector'], file)
+
+    def load_e_vector(self, path='e_vector.pkl'):
+        with open(path, 'rb') as file:
+            self.data_set_.data_['e_vector'] = pickle.load(file)
 
     def save_train_set(self, path='train_set.pkl'):
         with open(path, 'wb') as file:
@@ -460,20 +465,23 @@ class Handler():
             self.data_set_ = pickle.load(file)
 
     def __sample_batch(self, data_set):
-        data_set.reset_loop()
-        batch, _ = data_set.next_batch()
-        res = self.predict(self.sess, batch['input'], batch['e_vector'])
-        bs = data_set.bs_
-        for j in range(bs):
-            pred = res[j]
-            true = batch['output'][j]
-            pred = np.reshape(pred, (18, 2))
-            true = np.reshape(true, (18, 2))
+        data_set.reset_loop(is_random=False)
+        for w in range(np.random.randint(0, 10) * 20):
+            data_set.next_batch()
+        for w in range(5):
+            batch, _ = data_set.next_batch()
+            res = self.predict(self.sess, batch['input'], batch['e_vector'])
+            bs = data_set.bs_
+            for j in range(bs):
+                pred = res[j]
+                true = batch['output'][j]
+                pred = np.reshape(pred, (18, 2))
+                true = np.reshape(true, (18, 2))
 
-            img = draw_mouth_landmarks(800, pred)
-            img = draw_mouth_landmarks(800, true, (0, 0, 255), img, (0, 100))
-            cv2.imshow('frame', img)
-            cv2.waitKey(40)
+                img = draw_mouth_landmarks(800, pred, delta=(0, -150))
+                img = draw_mouth_landmarks(800, true, (0, 0, 255), img, (0, 150))
+                cv2.imshow('frame', img)
+                cv2.waitKey(40)
 
     def __loop_set(self, data_set, is_train):
         data_set.reset_loop(is_random=is_train)
@@ -519,8 +527,12 @@ class Handler():
         # 2. optimize e vector
         grad_E = result[-2]
         # e vector optimizer
-        new_e = self.net_.E_optimizer.apply_gradient(
-            batch['e_vector'], grad_E
+        # print(grad_E.shape)
+        # print(grad_E[0])
+        # print(grad_E[8])
+        # print()
+        new_e = self.net_.E_optimizer.apply_gradients(
+            batch['e_vector'], grad_E, indexes
         )
         data_set.adjust_e_vector(new_e, indexes)
         # net optimizer
@@ -555,8 +567,10 @@ class Handler():
             indexes = [int(d % audio_slices.shape[0])
                        for d in range(i * bs, (i + 1) * bs)]
             audio = audio_slices[indexes]
+            # ei = int(i % (e_vector.shape[0] - 1))
+            ei = 0
             res = self.predict(
-                sess, audio, np.expand_dims(e_vector, 0)
+                sess, audio, e_vector[ei: ei + 1]
             )
             for j in range(bs):
                 if i * bs + j != indexes[j]:
@@ -564,35 +578,37 @@ class Handler():
                 pred = res[j]
                 pred = np.reshape(pred, (18, 2))
                 result.append(pred)
+                if indexes[j] >= len(video_slices):
+                    break
                 true = video_slices[indexes[j]]
                 # true = np.reshape(true, (18, 2))
 
-                img = draw_mouth_landmarks(800, pred)
-                img = draw_mouth_landmarks(800, true, (0, 0, 255), img, (0, 100))
+                img = draw_mouth_landmarks(800, pred, delta=(0, -150))
+                img = draw_mouth_landmarks(800, true, (0, 0, 255), img, (0, 150))
                 cv2.imshow('frame', img)
                 cv2.waitKey(1)
-        assert(audio_slices.shape[0] == len(result))
+        # assert(audio_slices.shape[0] == len(result))
 
-        pred_name = name_prefix + '_pred.mp4'
-        true_name = name_prefix + '_true.mp4'
-        comp_name = name_prefix + '_comp.mp4'
-        if os.path.exists(pred_name):
-            os.remove(pred_name)
-        if os.path.exists(true_name):
-            os.remove(true_name)
-        if os.path.exists(comp_name):
-            os.remove(comp_name)
-        if os.path.exists('tmp.avi'):
-            os.remove('tmp.avi')
-        generate_video_from_landmarks(result, 'tmp.avi')
-        mux(a_path, 'tmp.avi', pred_name)
-        os.remove('tmp.avi')
-        generate_video_from_landmarks(video_slices, 'tmp.avi')
-        mux(a_path, 'tmp.avi', true_name)
-        os.remove('tmp.avi')
-        generate_compare_video(result, video_slices, 'tmp.avi')
-        mux(a_path, 'tmp.avi', comp_name)
-        os.remove('tmp.avi')
+        # pred_name = name_prefix + '_pred.mp4'
+        # true_name = name_prefix + '_true.mp4'
+        # comp_name = name_prefix + '_comp.mp4'
+        # if os.path.exists(pred_name):
+        #     os.remove(pred_name)
+        # if os.path.exists(true_name):
+        #     os.remove(true_name)
+        # if os.path.exists(comp_name):
+        #     os.remove(comp_name)
+        # if os.path.exists('tmp.avi'):
+        #     os.remove('tmp.avi')
+        # generate_video_from_landmarks(result, 'tmp.avi')
+        # mux(a_path, 'tmp.avi', pred_name)
+        # os.remove('tmp.avi')
+        # generate_video_from_landmarks(video_slices, 'tmp.avi')
+        # mux(a_path, 'tmp.avi', true_name)
+        # os.remove('tmp.avi')
+        # generate_compare_video(result, video_slices, 'tmp.avi')
+        # mux(a_path, 'tmp.avi', comp_name)
+        # os.remove('tmp.avi')
 
 
 if __name__ == '__main__':

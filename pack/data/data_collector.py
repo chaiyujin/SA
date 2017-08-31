@@ -119,10 +119,10 @@ class ForNvidia():
                     cv2.imshow('mouth', img)
                     cv2.waitKey(wait_key)
             print('->Get', len(data))
-            e_prefix = np.random.normal(loc=loc, scale=scale, size=(E - 1))
+            e_prefix = np.random.uniform(-1.0, 1.0, size=(E - 2))
             for i in range(int(len(data) / 2)):
                 for j in range(2):
-                    e_vector = np.random.normal(loc=loc, scale=0.01, size=(1))
+                    e_vector = np.random.normal(loc=loc, scale=0.1, size=(2))
                     e_vector = np.concatenate((e_prefix, e_vector))
                     # print(e_vector.shape)
                     data_map['input'].append(

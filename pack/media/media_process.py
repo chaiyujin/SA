@@ -2,6 +2,7 @@ from __future__ import division
 from __future__ import absolute_import
 
 import os
+import time
 import cv2
 import ffmpy
 import numpy as np
@@ -10,7 +11,7 @@ from python_speech_features import mfcc
 from .audio.feature.audio_feature import lpc_feature, rms_normalize
 from .audio.feature.audio_feature import formant
 from .video.video_feature import init_dde, landmark_feature
-from .video.video_feature import draw_mouth_landmarks
+from .video.video_feature import draw_mouth_landmarks, draw_landmarks
 
 W = 800
 VIDEO_FPS = 25.0
@@ -44,15 +45,19 @@ def demux_video(video_path, clear_old=False):
     # 2. resample video
     cap = cv2.VideoCapture(video_path)
     if cap.get(cv2.CAP_PROP_FPS) != VIDEO_FPS:
+        cap.release()
         if not os.path.exists(v_path):
             ffmpy.FFmpeg(
                 inputs={video_path: None},
                 outputs={v_path: '-qscale 0 -r ' + str(VIDEO_FPS) +
                                  ' -y -loglevel ' + LOG_LEVEL}
             ).run()
+            os.remove(video_path)
+            os.rename(v_path, video_path)
+            v_path = video_path
     else:
+        cap.release()
         v_path = video_path
-    cap.release()
 
     return {'video_path': v_path, 'audio_path': w_path}
 

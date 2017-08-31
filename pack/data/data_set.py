@@ -39,12 +39,6 @@ class DataSet():
         for i in range(len(indexes)):
             indexes[i] *= 2
             right.append(indexes[i] + 1)
-            if self.is_random_ and np.random.rand(1).mean() < 0.5:
-                indexes[i] += 1
-                right[i] += 1
-                if right[i] >= self.size_:
-                    indexes[i] -= 2
-                    right[i] -= 2
         right = np.asarray(right, dtype=np.int)
         indexes = np.concatenate((indexes, right), axis=0)
         res = {}
