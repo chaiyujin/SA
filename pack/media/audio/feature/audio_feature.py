@@ -127,7 +127,11 @@ def lpc_coefficient(signal, k=4, preemphsis=0.63):
     if preemphsis is not None:
         x1 = lfilter([1], [1., preemphsis], x1)
     ncoeff = k * 2
-    A, e, k = lpc(x1, ncoeff)
+    try:
+        A, e, k = lpc(x1, ncoeff)
+    except:
+        A = np.zeros((ncoeff + 1), np.float32)
+    # print(A.shape)
     return A
 
 

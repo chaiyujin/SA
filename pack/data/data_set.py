@@ -16,6 +16,7 @@ class DataSet():
     def reset_loop(self, is_random=False):
         self.loop_i_ = 0
         self.loop_idx_ = [i for i in range(int((self.size_ - 1) / 2))]
+        self.is_random_ = is_random
         if is_random:
             for i in range(int(self.size_ / 2)):
                 x = np.random.randint(0, len(self.loop_idx_))
@@ -38,6 +39,12 @@ class DataSet():
         for i in range(len(indexes)):
             indexes[i] *= 2
             right.append(indexes[i] + 1)
+            if self.is_random_ and np.random.rand(1).mean() < 0.5:
+                indexes[i] += 1
+                right[i] += 1
+                if right[i] >= self.size_:
+                    indexes[i] -= 2
+                    right[i] -= 2
         right = np.asarray(right, dtype=np.int)
         indexes = np.concatenate((indexes, right), axis=0)
         res = {}

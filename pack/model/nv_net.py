@@ -3,6 +3,7 @@ from __future__ import absolute_import
 import os
 import cv2
 import sys
+import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
@@ -75,7 +76,6 @@ def audio_abstraction_net(input, drop):
 
 def articulation_net(audio_feature, e_vector, drop):
     def concat_kernel(x, y):
-        return x
         tile = get_shape(x)
         tile[0] = 1
         tile[-1] = 1
@@ -112,6 +112,10 @@ def articulation_net(audio_feature, e_vector, drop):
             else:
                 layer_input = layer[i]
             output = tflayers.conv2d(layer_input, **layer_config)
+            # output = tflayers.layer_norm(output)
+            # tf.summary.scalar('conv2d' + str(i), tf.reduce_mean(output))
+            # e_vector = tflayers.layer_norm(e_vector)
+            # tf.summary.scalar('e_vec' + str(i), tf.reduce_mean(e_vector))
             # concat with e_vector
             concated = concat_kernel(output, e_vector)
             layer.append(concated)
@@ -173,38 +177,51 @@ def output_net(anime_feature, init_pca, init_mean):
 def loss_function(pred, true, e_vector):
     def m(x, y):
         return tf.subtract(x, y)
+
     # 1. position term
-    P = tf.reduce_mean(
-        tf.square(tf.subtract(true, pred)),
-        axis=1
-    )
-    # 2. movement term
-    shape = get_shape(pred)
-    half_size = int(shape[0] / 2)
-    pred_l = pred[:half_size]
-    pred_r = pred[half_size:]
-    true_l = true[:half_size]
-    true_r = true[half_size:]
-    M = tf.reduce_mean(
-        tf.square(
-            tf.subtract(
-                m(pred_l, pred_r),
-                m(true_l, true_r)
-            )
-        ),
-        axis=1
-    )
-    M = tf.multiply(M, 2)
-    # 3. evector
-    evec_l = e_vector[:half_size]
-    evec_r = e_vector[half_size:]
-    R_ = tf.reduce_mean(
-        tf.square(m(evec_l, evec_r)),
-        axis=1
-    )
-    R_ = tf.multiply(R_, 2)
-    nm = tf.reduce_mean(tf.square(e_vector))
-    R = tf.divide(R_, nm)
+    with tf.variable_scope('P'):
+        P = tf.reduce_mean(
+            tf.square(tf.subtract(true, pred)),
+            axis=1
+        )
+    with tf.variable_scope('M'):
+        # 2. movement term
+        shape = get_shape(pred)
+        half_size = int(shape[0] / 2)
+        pred_l = pred[:half_size]
+        pred_r = pred[half_size:]
+        true_l = true[:half_size]
+        true_r = true[half_size:]
+        M = tf.reduce_mean(
+            tf.square(
+                tf.subtract(
+                    m(pred_l, pred_r),
+                    m(true_l, true_r)
+                )
+            ),
+            axis=1
+        )
+        M = tf.multiply(M, 2)
+    with tf.variable_scope('R'):
+        # 3. evector
+        evec_l = e_vector[:half_size]
+        evec_r = e_vector[half_size:]
+        R_ = tf.reduce_mean(
+            tf.square(m(evec_l, evec_r)),
+            axis=1
+        )
+        R_ = tf.multiply(R_, 2)
+        nm = tf.reduce_mean(tf.square(e_vector))
+        R = tf.divide(R_, nm)
+
+    print('P', P.shape)
+    print('M', M.shape)
+    print('R_', R_.shape)
+    print('R', R.shape)
+    tf.summary.scalar('P', tf.reduce_mean(P))
+    tf.summary.scalar('M', tf.reduce_mean(M))
+    tf.summary.scalar('R', tf.reduce_mean(R))
+    tf.summary.scalar('R_', tf.reduce_mean(R_))
 
     return P, M, R
 
@@ -222,16 +239,19 @@ def regularize_loss(loss_list, reg_list):
         tf.reduce_mean(loss_list[2]),
         reg_list[2].scale
     )
-    return tf.add(Lp, Lm)
-    # return tf.add(tf.add(Lp, Lm), Lr)
+    tf.summary.scalar('Lp', tf.reduce_mean(Lp))
+    tf.summary.scalar('Lm', tf.reduce_mean(Lm))
+    tf.summary.scalar('Lr', tf.reduce_mean(Lr))
+    # return tf.add(Lp, Lm)
+    return tf.add(tf.add(Lp, Lm), Lr, name='RegLoss')
 
 
 class LossRegularizer():
-    def __init__(self, decay=0.99):
+    def __init__(self, name, decay=0.99):
         self.decay_ = decay
         self.beta_t_ = 1
         self.v_ = 0
-        self.scale = tf.placeholder(tf.float32, [1])
+        self.scale = tf.placeholder(tf.float32, [1], name='scale' + name)
         self.feed_dict = {
             self.scale: np.asarray([1], dtype=np.float32)
         }
@@ -249,11 +269,12 @@ class LossRegularizer():
                 dtype=np.float32
             )
         }
+        # print('update', 1 / (np.sqrt(v_hat) + 1e-8), '\t')
 
 
 class Net():
     def __init__(self, input, output, e_vector, init_pca, init_mean, drop):
-        audio_feature, var_list0 = audio_abstraction_net(input, drop)
+        audio_feature, var_list0 = audio_abstraction_net(input, 0)
         anime_feature, var_list1 = articulation_net(audio_feature, e_vector,
                                                     drop)
         pca_coeff, landmarks_pred, var_list2, var_list3 =\
@@ -273,19 +294,14 @@ class Net():
         # regularized loss
         self.loss_regular_ = []
         for i, loss_fn in enumerate(self.loss_fn_list):
-            self.loss_regular_.append(LossRegularizer())
+            self.loss_regular_.append(LossRegularizer(str(i)))
         self.loss = regularize_loss(self.loss_fn_list, self.loss_regular_)
-        # self.loss = tf.losses.mean_pairwise_squared_error(
-        #     labels=self.output,
-        #     predictions=self.pred
-        # )
         # gradient for e
-        # self.grad_E = tf.gradients(self.loss, [e_vector])[0]
-        # self.E_optimizer = Adam(1e-8)
+        self.grad_E = tf.gradients(self.loss, [e_vector])[0]
 
         self.saver = tf.train.Saver()
 
-    def set_optimizer(self, lr=1e-4, pca_lr=1e-12):
+    def set_optimizer(self, lr=1e-4, pca_lr=1e-12, e_lr=1e-8):
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(lr).minimize(
             self.loss, var_list=self.var_list
@@ -293,6 +309,7 @@ class Net():
         self.pca_optimizer = tf.train.AdamOptimizer(pca_lr).minimize(
             self.loss, var_list=self.pca_var
         )
+        self.E_optimizer = Adam(e_lr)
         self.optimizer_list = [self.optimizer, self.pca_optimizer]
 
     def feed_dict(self, batch):
@@ -340,15 +357,31 @@ class Handler():
         self.data_set_ = train_set
         self.test_set_ = valid_set
         self.net_ = net
+        self.train_id_ = 0
 
-    def set_learning_rate(self, lr=1e-4, pca_lr=1e-12):
-        self.net_.set_optimizer(lr, pca_lr)
+    def set_learning_rate(self, lr=1e-4, pca_lr=1e-12, e_lr=1e-8):
+        self.net_.set_optimizer(lr, pca_lr, e_lr)
 
     def init_variables(self, sess):
+        self.merged = tf.summary.merge_all()
+        self.train_writer = tf.summary.FileWriter('./log', sess.graph)
         sess.run(tf.global_variables_initializer())
 
-    def train(self, sess, n_epoches, mode='loop'):
-        N_EARLY_STOP = 80
+    def train(self, sess, n_epoches, N_EARLY_STOP=50, mode='loop'):
+        self.train_id_ += 1
+        self.save_path_ = 'save_' + str(self.train_id_) + '/'
+        if not os.path.exists(self.save_path_):
+            os.mkdir(self.save_path_)
+        self.save_path_ = self.save_path_ + 'my-model.pkl'
+        if not os.path.exists(self.save_path_ + '.index'):
+            if self.train_id_ > 1:
+                last_path = 'save_' + str(self.train_id_ - 1) + '/my-model.pkl'
+                self.restore(sess, last_path)
+        else:
+            self.restore(sess, self.save_path_)
+            print('Training phase', self.train_id_, 'is already done.')
+            return
+        print('Begin training phase', self.train_id_)
         self.sess = sess
         best_loss = 1e6
         early_step = N_EARLY_STOP
@@ -359,7 +392,6 @@ class Handler():
             'train_m': [],
             'valid_m': []
         }
-
         for epoch in range(n_epoches):
             if mode == 'random':
                 batch, indexes = self.data_set_.random_batch()
@@ -368,18 +400,22 @@ class Handler():
                 valid_result = self.__valid_batch(batch, indexes)
             elif mode == 'loop':
                 train_result = self.__loop_set(self.data_set_, is_train=True)
-                valid_result = self.__loop_set(self.test_set_, is_train=False)
+                # valid_result = self.__loop_set(self.test_set_, is_train=False)
+                valid_result = train_result
             # 4. print the loss
             print('[' + str(epoch) + '/' + str(n_epoches) + ']', 'train loss:'
                   'P %.4f' % train_result[0].mean(),
-                  'M %.4f' % train_result[1].mean(), '\tvalid loss:',
+                  'M %.4f' % train_result[1].mean(),
+                  'R %.4f' % train_result[2].mean(), '\tvalid loss:',
                   'P %.4f' % valid_result[0].mean(),
-                  'M %.4f' % valid_result[1].mean())
+                  'M %.4f' % valid_result[1].mean(),
+                  'R %.4f' % valid_result[2].mean())
             cur_loss = valid_result[0].mean()
             print(cur_loss, best_loss, early_step)
             if cur_loss < best_loss:
                 best_loss = cur_loss
-                self.net_.saver.save(sess, 'save/my-model.pkl')
+                self.net_.saver.save(sess, self.save_path_)
+                self.save_e_vector()
                 early_step = N_EARLY_STOP
             else:
                 early_step -= 1
@@ -402,11 +438,26 @@ class Handler():
             m_plt.plot(epoch_list, loss_lists['valid_m'], 'r', label='valid')
             p_plt.legend(prop={'size': 8})
             m_plt.legend(prop={'size': 8})
-            plt.savefig('error.png')
+            plt.savefig('error_' + str(self.train_id_) + '.png')
             plt.clf()
             plt.close(fig)
 
             # self.__sample_batch(self.test_set_)
+        # self.save_train_set()
+
+    def save_e_vector(self, path='e_vector.pkl'):
+        with open(path, 'wb') as file:
+            pickle.dump(self.data_set_.data_['e_vector'], file)
+
+    def save_train_set(self, path='train_set.pkl'):
+        with open(path, 'wb') as file:
+            print('Save train set into', path)
+            pickle.dump(self.data_set_, file)
+
+    def load_train_set(self, path='train_set.pkl'):
+        with open(path, 'rb') as file:
+            print('Load train set from', path)
+            self.data_set_ = pickle.load(file)
 
     def __sample_batch(self, data_set):
         data_set.reset_loop()
@@ -430,6 +481,7 @@ class Handler():
         cnt = 0
         result = None
         for i in range(total):
+            self.epoch_i_ = i
             batch, indexes = data_set.next_batch()
             if is_train:
                 tmp_res = self.__train_batch(batch, indexes, data_set)
@@ -437,9 +489,10 @@ class Handler():
                 tmp_res = self.__valid_batch(batch, indexes)
             result = tmp_res if result is None else (tmp_res + result)
             cnt += 1
-            loss_str = '%.4f\t%.4f' %\
+            loss_str = '%.4f\t%.4f\t%.4f' %\
                        (result[0].mean() / cnt,
-                        result[1].mean() / cnt)
+                        result[1].mean() / cnt,
+                        result[2].mean() / cnt)
             printProgressBar(i, total - 1, loss_str)
         result /= cnt
         return result
@@ -450,7 +503,7 @@ class Handler():
         for i in range(len(self.net_.loss_fn_list)):
             to_run.append(self.net_.loss_fn_list[i])
         result = self.sess.run(to_run, feed_dict=feed_dict)
-        return np.asarray([result[0], result[1]])
+        return np.asarray([result[0], result[1], result[2]])
 
     def __train_batch(self, batch, indexes, data_set):
         # 1. calc loss function
@@ -459,28 +512,28 @@ class Handler():
         for i in range(len(self.net_.loss_fn_list)):
             to_run.append(self.net_.loss_fn_list[i])
         to_run.extend([
-            # self.net_.grad_E,
+            self.net_.grad_E,
             self.net_.loss
         ])
-        # to_run = [self.net_.pca, self.net_.loss]
         result = self.sess.run(to_run, feed_dict=feed_dict)
         # 2. optimize e vector
-        # grad_E = result[-2]
-        # # e vector optimizer
-        # new_e = self.net_.E_optimizer.apply_gradient(
-        #     batch['e_vector'], grad_E
-        # )
-        # data_set.adjust_e_vector(new_e, indexes)
+        grad_E = result[-2]
+        # e vector optimizer
+        new_e = self.net_.E_optimizer.apply_gradient(
+            batch['e_vector'], grad_E
+        )
+        data_set.adjust_e_vector(new_e, indexes)
         # net optimizer
-        self.sess.run(
-            [self.net_.optimizer],  #, self.net_.pca_optimizer],
+        summary = self.sess.run(
+            [self.merged, self.net_.optimizer, self.net_.pca_optimizer],
             feed_dict=feed_dict
-        )    
+        )[0]
+        self.train_writer.add_summary(summary, self.epoch_i_)
         # 3. update the loss regularizer
         self.net_.update_loss_regularizer(
             result[:len(self.net_.loss_fn_list)]
         )
-        return np.asarray([result[0], result[1]])
+        return np.asarray([result[0], result[1], result[2]])
 
     def predict(self, sess, input, e_vector):
         to_run = [self.net_.pred]
@@ -489,12 +542,13 @@ class Handler():
             self.net_.e_vector: e_vector
         }
 
-        return sess.run(to_run, feed_dict=feed_dict)[0]
+        result = sess.run(to_run, feed_dict=feed_dict)
+        return result[0]
 
     def restore(self, sess, path='save/my-model.pkl'):
         self.net_.saver.restore(sess, path)
 
-    def sample(self, sess, audio_slices, video_slices, a_path, name_prefix):
+    def sample(self, sess, audio_slices, video_slices, e_vector, a_path, name_prefix):
         bs = int(self.net_.input.get_shape()[0])
         result = []
         for i in range(int(audio_slices.shape[0] / bs + 1)):
@@ -502,7 +556,7 @@ class Handler():
                        for d in range(i * bs, (i + 1) * bs)]
             audio = audio_slices[indexes]
             res = self.predict(
-                sess, audio, np.zeros((bs, 24))
+                sess, audio, np.expand_dims(e_vector, 0)
             )
             for j in range(bs):
                 if i * bs + j != indexes[j]:

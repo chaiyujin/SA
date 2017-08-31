@@ -37,7 +37,7 @@ class ForNvidia():
         # audio
         rate, audio = wavfile.read(audio_path)
         pad_length = int(rate * 0.26)
-        zeros = np.full((pad_length), 1e-6)
+        zeros = np.zeros((pad_length))
         audio = np.concatenate((zeros, audio), axis=0)
         audio = np.concatenate((audio, zeros), axis=0)
         a_feature = lpc_feature(audio, rate,
@@ -54,7 +54,8 @@ class ForNvidia():
         slices = np.expand_dims(np.asarray(slices), -1)
         return slices, lm_feature, audio_path
 
-    def collect(self, loc=0.0, scale=0.01, E=24,
+    def collect(self, pca_percentage=0.99,
+                loc=0.0, scale=0.01, E=24,
                 keep_even=True, wait_key=-1,
                 cache_path=None, force_replace=False):
         if (not force_replace) and cache_path and os.path.exists(cache_path):
@@ -62,8 +63,8 @@ class ForNvidia():
                 res = pickle.load(file)
                 self.train_data = res[0]
                 self.valid_data = res[1]
-                self._all_video_feature = res[2]
-                return res[0], res[1]
+                self.pca_result = res[2]
+                return res[0], res[1], res[2]
         print('Collecting data from:', self._input_dir)
         self.train_data = {
             'input': [], 'output': [],
@@ -118,9 +119,12 @@ class ForNvidia():
                     cv2.imshow('mouth', img)
                     cv2.waitKey(wait_key)
             print('->Get', len(data))
-            e_vector = np.random.normal(loc=loc, scale=scale, size=(E))
+            e_prefix = np.random.normal(loc=loc, scale=scale, size=(E - 1))
             for i in range(int(len(data) / 2)):
                 for j in range(2):
+                    e_vector = np.random.normal(loc=loc, scale=0.01, size=(1))
+                    e_vector = np.concatenate((e_prefix, e_vector))
+                    # print(e_vector.shape)
                     data_map['input'].append(
                         np.expand_dims(data[i * 2 + j]['audio'], -1))
                     data_map['output'].append(
@@ -135,6 +139,12 @@ class ForNvidia():
             self.train_data[k] = np.asarray(self.train_data[k])
             self.valid_data[k] = np.asarray(self.valid_data[k])
 
+        self.pca = PCA(n_components=pca_percentage, svd_solver='full')
+        self.pca.fit(self._all_video_feature)
+        self.pca_result = {
+            'components': self.pca.components_,
+            'mean': self.pca.mean_
+        }
         print('Train data:', self.train_data['len'])
         print('Valid data:', self.valid_data['len'])
 
@@ -144,15 +154,11 @@ class ForNvidia():
                     (
                         self.train_data,
                         self.valid_data,
-                        self._all_video_feature
+                        self.pca_result
                     ),
                     f
                 )
-        return self.train_data, self.valid_data
-
-    def pca_video_feature(self, percentage=0.99):
-        self.pca = PCA(n_components=percentage, svd_solver='full')
-        self.pca.fit(self._all_video_feature)
+        return self.train_data, self.valid_data, self.pca_result
 
 
 if __name__ == '__main__':
