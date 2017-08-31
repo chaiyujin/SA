@@ -40,16 +40,11 @@ def audio_abstraction_net(input, drop):
     with tf.variable_scope(scope):
         # input: 64 x 32 x 1
         layers_config = [
-            {'num_outputs': 72, 'kernel_size': (1, 3),
-             'stride': (1, 2), 'activation_fn': lrelu},
-            {'num_outputs': 108, 'kernel_size': (1, 3),
-             'stride': (1, 2), 'activation_fn': lrelu},
-            {'num_outputs': 162, 'kernel_size': (1, 3),
-             'stride': (1, 2), 'activation_fn': lrelu},
-            {'num_outputs': 243, 'kernel_size': (1, 3),
-             'stride': (1, 2), 'activation_fn': lrelu},
-            {'num_outputs': 256, 'kernel_size': (1, 2),
-             'stride': (1, 2), 'activation_fn': lrelu}
+            {'num_outputs': 72, 'kernel_size': (1, 3), 'stride': (1, 2)},
+            {'num_outputs': 108, 'kernel_size': (1, 3), 'stride': (1, 2)},
+            {'num_outputs': 162, 'kernel_size': (1, 3), 'stride': (1, 2)},
+            {'num_outputs': 243, 'kernel_size': (1, 3), 'stride': (1, 2)},
+            {'num_outputs': 256, 'kernel_size': (1, 2), 'stride': (1, 2)}
         ]
 
         print(scope + ' {')
@@ -57,10 +52,6 @@ def audio_abstraction_net(input, drop):
         print()
         layer = [input]
         for i, layer_config in enumerate(layers_config):
-            # if drop > 0:
-            #     layer_input = tflayers.dropout(layer[i], 1 - drop)
-            # else:
-            #     layer_input = layer[i]
             output = tflayers.conv2d(layer[i], **layer_config)
             if drop > 0:
                 output = tflayers.dropout(output, 1 - drop)
@@ -90,16 +81,11 @@ def articulation_net(audio_feature, e_vector, drop):
     with tf.variable_scope(scope):
         # input: 32 x 1 x (256 + E)
         layers_config = [
-            {'num_outputs': 256, 'kernel_size': (3, 1),
-             'stride': (2, 1), 'activation_fn': lrelu},
-            {'num_outputs': 256, 'kernel_size': (3, 1),
-             'stride': (2, 1), 'activation_fn': lrelu},
-            {'num_outputs': 256, 'kernel_size': (3, 1),
-             'stride': (2, 1), 'activation_fn': lrelu},
-            {'num_outputs': 256, 'kernel_size': (3, 1),
-             'stride': (2, 1), 'activation_fn': lrelu},
-            {'num_outputs': 256, 'kernel_size': (4, 1),
-             'stride': (4, 1), 'activation_fn': lrelu}
+            {'num_outputs': 256, 'kernel_size': (3, 1), 'stride': (2, 1)},
+            {'num_outputs': 256, 'kernel_size': (3, 1), 'stride': (2, 1)},
+            {'num_outputs': 256, 'kernel_size': (3, 1), 'stride': (2, 1)},
+            {'num_outputs': 256, 'kernel_size': (3, 1), 'stride': (2, 1)},
+            {'num_outputs': 256, 'kernel_size': (4, 1), 'stride': (4, 1)}
         ]
 
         print(scope + ' {')
@@ -112,11 +98,6 @@ def articulation_net(audio_feature, e_vector, drop):
             output = tflayers.conv2d(layer[i], **layer_config)
             if drop > 0:
                 output = tflayers.dropout(output, 1 - drop)
-            # output = tflayers.layer_norm(output)
-            # tf.summary.scalar('conv2d' + str(i), tf.reduce_mean(output))
-            # e_vector = tflayers.layer_norm(e_vector)
-            # tf.summary.scalar('e_vec' + str(i), tf.reduce_mean(e_vector))
-            # concat with e_vector
             concated = concat_kernel(output, e_vector)
             layer.append(concated)
             # print shape
@@ -144,7 +125,7 @@ def output_net(anime_feature, init_pca, init_mean):
         layer_config = {
             'inputs': anime_feature,
             'num_outputs': len(init_pca),
-            'activation_fn': lrelu
+            'activation_fn': None
         }
         pca_coeff = tflayers.fully_connected(**layer_config)
         print_shape(pca_coeff, '\tlayer0 output')
@@ -275,8 +256,8 @@ class LossRegularizer():
 class Net():
     def __init__(self, input, output, e_vector, init_pca, init_mean, drop):
         audio_feature, var_list0 = audio_abstraction_net(input, drop)
-        anime_feature, var_list1 = articulation_net(audio_feature, e_vector,
-                                                    drop)
+        anime_feature, var_list1 = articulation_net(
+            audio_feature, e_vector, drop)
         pca_coeff, landmarks_pred, var_list2, var_list3 =\
             output_net(anime_feature, init_pca, init_mean)
         var_list0.extend(var_list1)
